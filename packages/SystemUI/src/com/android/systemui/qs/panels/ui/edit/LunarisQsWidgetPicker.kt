@@ -169,6 +169,8 @@ internal fun LunarisQsWidgetPicker(
                                 when (panel) {
                                     AxQsLayout.QQS -> R.string.ax_qs_settings_layout_top
                                     AxQsLayout.QS -> R.string.ax_qs_settings_layout_full
+                                    AxQsLayout.QS_NETWORK -> R.string.ax_qs_settings_layout_network
+                                    AxQsLayout.QS_CUSTOM -> R.string.ax_qs_settings_layout_custom
                                     AxQsLayout.SPLIT_SHADE -> R.string.ax_qs_settings_layout_large
                                 }
                             ),

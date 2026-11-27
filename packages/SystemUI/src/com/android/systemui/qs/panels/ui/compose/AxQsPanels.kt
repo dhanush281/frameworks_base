@@ -645,12 +645,17 @@ internal fun AxQsPagerIndicator(
 }
 
 @Composable
-internal fun AxEditButton(viewModel: ToolbarViewModel, containerColor: Color = AxTileDefaults.backgroundColor()) {
+internal fun AxEditButton(
+    viewModel: ToolbarViewModel,
+    containerColor: Color = AxTileDefaults.backgroundColor(),
+    buttonSize: Dp = AxHeaderActionDimensions.ButtonSize,
+) {
     val editModeButtonViewModel =
         rememberViewModel("AxQsActions") { viewModel.editModeButtonViewModelFactory.create() }
     if (!editModeButtonViewModel.isEditButtonVisible) return
     AxHeaderButton(
         containerColor = containerColor,
+        buttonSize = buttonSize,
         onClick = { editModeButtonViewModel.onButtonClick() },
         onLongClick = { editModeButtonViewModel.onButtonLongClick() },
         modifier = Modifier.miuiQsHeaderMotion().sysuiResTag("qs_edit_mode_button"),
@@ -671,10 +676,12 @@ internal fun FooterIconButton(
     modifier: Modifier = Modifier,
     iconColor: Color = ShadeHeader.Colors.textColor,
     iconModifier: Modifier = Modifier.size(AxHeaderActionDimensions.IconSize),
+    buttonSize: Dp = AxHeaderActionDimensions.ButtonSize,
 ) {
     if (model == null) return
     AxHeaderButton(
         containerColor = containerColor,
+        buttonSize = buttonSize,
         onClick = model.onClick,
         modifier = modifier,
     ) {
@@ -691,11 +698,13 @@ private fun AxHeaderButton(
     onClick: (SystemUiExpandable) -> Unit,
     modifier: Modifier = Modifier,
     containerColor: Color = AxTileDefaults.backgroundColor(),
+    buttonSize: Dp = AxHeaderActionDimensions.ButtonSize,
     onLongClick: ((SystemUiExpandable) -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     CompositionLocalProvider(
-        LocalMinimumInteractiveComponentSize provides AxHeaderActionDimensions.LayoutSize
+        LocalMinimumInteractiveComponentSize provides
+            maxOf(AxHeaderActionDimensions.LayoutSize, buttonSize + 4.dp)
     ) {
         Expandable(
             color = containerColor,
@@ -707,7 +716,7 @@ private fun AxHeaderButton(
             defaultMinSize = false,
         ) {
             Box(
-                modifier = Modifier.size(AxHeaderActionDimensions.ButtonSize),
+                modifier = Modifier.size(buttonSize),
                 contentAlignment = Alignment.Center,
             ) {
                 content()

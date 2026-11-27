@@ -50,7 +50,7 @@ constructor(
     val isLocationIndicationEnabled: StateFlow<Boolean> = repository.isLocationIndicationEnabled
 
     /** Notifies that the privacy chip was clicked. */
-    fun onPrivacyChipClicked(privacyChip: OngoingPrivacyChip) {
+    fun onPrivacyChipClicked(privacyChip: OngoingPrivacyChip? = null) {
         if (!deviceProvisionedController.isDeviceProvisioned) return
 
         applicationScope.launch {

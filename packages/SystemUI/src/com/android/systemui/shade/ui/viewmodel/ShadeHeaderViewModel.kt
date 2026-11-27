@@ -203,7 +203,7 @@ constructor(
     }
 
     /** Notifies that the privacy chip was clicked. */
-    fun onPrivacyChipClicked(privacyChip: OngoingPrivacyChip) {
+    fun onPrivacyChipClicked(privacyChip: OngoingPrivacyChip? = null) {
         privacyChipInteractor.onPrivacyChipClicked(privacyChip)
     }
 

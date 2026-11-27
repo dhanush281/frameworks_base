@@ -58,6 +58,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -114,6 +115,7 @@ import com.android.systemui.kairos.buildSpec
 import com.android.systemui.kairos.util.nameTag
 import com.android.systemui.privacy.OngoingPrivacyChip
 import com.android.systemui.privacy.PrivacyItem
+import com.android.systemui.privacy.PrivacyType
 import com.android.systemui.qs.panels.shared.model.AxQsLayoutPadding
 import com.android.systemui.qs.panels.ui.viewmodel.toolbar.ToolbarViewModel
 import com.android.systemui.res.R
@@ -297,7 +299,9 @@ internal fun AxSeparatePanelHeader(
     val buttonColor = if (tint.luminance() > 0.5f) Color.Black.copy(alpha = 0.38f)
         else Color.White.copy(alpha = 0.55f)
     Column(
-        modifier.windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+        modifier
+            .wrapContentHeight(align = Alignment.Top, unbounded = true)
+            .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
             .padding(horizontal = sidePadding, vertical = 6.dp),
     ) {
         Row(
@@ -309,22 +313,40 @@ internal fun AxSeparatePanelHeader(
             verticalAlignment = Alignment.Top,
         ) {
             if (quickSettings) {
-                Box(Modifier.weight(1f)) {
-                    AxEditButton(toolbarViewModel, containerColor = buttonColor)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    FooterIconButton(
-                        model = toolbarViewModel.userSwitcherViewModel,
-                        containerColor = Color.Transparent,
-                        iconColor = Color.Unspecified,
-                        iconModifier = Modifier.fillMaxSize().clip(CircleShape),
-                        modifier = Modifier.miuiQsHeaderMotion(),
-                    )
-                    FooterIconButton(
-                        model = toolbarViewModel.settingsButtonViewModel,
-                        containerColor = buttonColor,
-                        modifier = Modifier.miuiQsHeaderMotion(),
-                    )
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AxEditButton(toolbarViewModel, containerColor = buttonColor, buttonSize = 40.dp)
+                    Box(
+                        Modifier.weight(1f).padding(horizontal = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (viewModel.isPrivacyChipVisible) {
+                            AxSeparatePrivacyPill(
+                                privacyItems = viewModel.privacyItems,
+                                background = buttonColor,
+                                textColor = tint,
+                                onClick = { viewModel.onPrivacyChipClicked(null) },
+                            )
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        FooterIconButton(
+                            model = toolbarViewModel.userSwitcherViewModel,
+                            containerColor = Color.Transparent,
+                            iconColor = Color.Unspecified,
+                            iconModifier = Modifier.fillMaxSize().clip(CircleShape),
+                            buttonSize = 40.dp,
+                            modifier = Modifier.miuiQsHeaderMotion(),
+                        )
+                        FooterIconButton(
+                            model = toolbarViewModel.settingsButtonViewModel,
+                            containerColor = buttonColor,
+                            buttonSize = 40.dp,
+                            modifier = Modifier.miuiQsHeaderMotion(),
+                        )
+                    }
                 }
             } else {
                 Column(Modifier.weight(1f)) {
@@ -352,7 +374,7 @@ internal fun AxSeparatePanelHeader(
             Spacer(Modifier.size(4.dp))
             AxBatteryInfo(viewModel, showIcon = true, useExpandedFormat = false, textColor = tint,
                 iconTint = tint, iconBackgroundColor = Color.Transparent, onClick = viewModel::onBatteryClicked)
-            if (viewModel.isPrivacyChipVisible) {
+            if (!quickSettings && viewModel.isPrivacyChipVisible) {
                 AxPrivacyChip(viewModel.privacyItems, viewModel::onPrivacyChipClicked)
             }
         }
@@ -360,9 +382,92 @@ internal fun AxSeparatePanelHeader(
 }
 
 @Composable
+private fun AxSeparatePrivacyPill(
+    privacyItems: List<PrivacyItem>,
+    background: Color,
+    textColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (privacyItems.isEmpty()) return
+    val context = LocalContext.current
+    val types = remember(privacyItems) { privacyItems.map { it.privacyType }.distinct().sorted() }
+    val primaryItem =
+        remember(privacyItems) {
+            privacyItems.firstOrNull { it.privacyType != PrivacyType.TYPE_LOCATION }
+                ?: privacyItems.first()
+        }
+    val extraApps =
+        remember(privacyItems) {
+            (privacyItems.map { it.application }.distinct().size - 1).coerceAtLeast(0)
+        }
+    val appLabel =
+        remember(primaryItem.application, extraApps) {
+            val pkg = primaryItem.application.packageName
+            val userId = UserHandle.getUserId(primaryItem.application.uid)
+            val label =
+                try {
+                    val pm = context.packageManager
+                    pm.getApplicationLabel(pm.getApplicationInfoAsUser(pkg, 0, userId)).toString()
+                } catch (_: Exception) {
+                    pkg
+                }
+            if (extraApps > 0) "$label +$extraApps" else label
+        }
+    val locationOnly = types.size == 1 && types[0] == PrivacyType.TYPE_LOCATION
+    val badgeColor = if (locationOnly) Color(0xFF2B7FFF) else Color(0xFF34C759)
+    Row(
+        modifier =
+            modifier
+                .miuiQsHeaderMotion()
+                .height(32.dp)
+                .clip(CircleShape)
+                .background(background)
+                .clickable(onClick = onClick)
+                .padding(start = 6.dp, end = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier =
+                Modifier.height(20.dp)
+                    .background(badgeColor, CircleShape)
+                    .padding(horizontal = if (types.size == 1) 3.5.dp else 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            types.forEach { type ->
+                Icon(
+                    painter =
+                        painterResource(
+                            when (type) {
+                                PrivacyType.TYPE_CAMERA -> R.drawable.ic_privacy_camera
+                                PrivacyType.TYPE_MICROPHONE -> R.drawable.ic_privacy_mic
+                                PrivacyType.TYPE_LOCATION -> R.drawable.ic_privacy_location
+                                else -> type.iconId
+                            }
+                        ),
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(13.dp),
+                )
+            }
+        }
+        Text(
+            text = appLabel,
+            color = textColor,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun NotificationSettingsButton(tint: Color, background: Color, onClick: () -> Unit) {
     IconButton(onClick = onClick, modifier = Modifier.miuiQsHeaderMotion()) {
-        Box(Modifier.size(36.dp).background(background, CircleShape), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(40.dp).background(background, CircleShape), contentAlignment = Alignment.Center) {
             Box(Modifier.size(20.dp)) {
                 Icon(
                     painterResource(R.drawable.ic_notification_bell),
@@ -519,6 +624,11 @@ private fun AxPrivacyChip(
     AndroidView(
         factory = { context ->
             OngoingPrivacyChip(context, null).also { chip ->
+                chip.layoutParams =
+                    ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    )
                 chip.useGroupedStyle = true
                 chip.privacyList = privacyList
                 chip.setOnClickListener { onClick(chip) }

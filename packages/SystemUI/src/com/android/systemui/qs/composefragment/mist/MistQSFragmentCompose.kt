@@ -48,6 +48,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -213,6 +215,8 @@ import com.android.systemui.qs.panels.ui.compose.LocalLunarisQsSliderStrokeWidth
 import com.android.systemui.qs.panels.ui.compose.LocalLunarisQsTileStrokeStyle
 import com.android.systemui.qs.panels.ui.compose.LocalLunarisQsTileStrokeWidth
 import com.android.systemui.qs.panels.ui.compose.LocalQsScrollGestureStart
+import com.android.systemui.qs.panels.ui.compose.LunarisSplitQsPage
+import com.android.systemui.qs.panels.ui.compose.LunarisSplitQsPager
 import com.android.systemui.qs.panels.ui.compose.LocalMiuiQsHeaderMotion
 import com.android.systemui.qs.panels.ui.compose.LocalMiuiQsMotionController
 import com.android.systemui.qs.panels.ui.compose.MiuiQsMotionController
@@ -289,6 +293,8 @@ constructor(
     private val composeViewPositionOnScreen = Rect()
     private val scrollState = ScrollState(0)
     private var activeQsScrollState: ScrollState? = null
+    private var splitQsPagerState by mutableStateOf<PagerState?>(null)
+    private var pendingEditLayout by mutableStateOf<AxQsLayout?>(null)
     private val locationTemp = IntArray(2)
     private var bottomBarPositionInRoot = IntRect(IntOffset(0, 0), 0)
     private var bottomContentPadding by mutableIntStateOf(0)
@@ -306,6 +312,8 @@ constructor(
         get() =
             axQsViewModel.panelMode == AxQsPanelMode.SEPARATE && !viewModel.isInSplitShade &&
                 viewModel.statusBarState == StatusBarState.SHADE
+    private val useSplitQsPages: Boolean
+        get() = isSeparateShade && axQsViewModel.splitQsPages && !axQsViewModel.useLandscapeLayout
 
     private val sceneExpansionState: QSFragmentComposeViewModel.QSExpansionState
         get() {
@@ -363,21 +371,35 @@ constructor(
         val canScrollQs =
             object : CanScrollQs {
                 override fun reset() {
-                    activeQsScrollState = null
+                    if (!useSplitQsPages) {
+                        activeQsScrollState = null
+                    }
                 }
 
                 override fun forward(): Boolean {
-                    return ((activeQsScrollState ?: scrollState).canScrollForward &&
-                        viewModel.isQsFullyExpanded) ||
-                        isCustomizing
+                    if (isCustomizing) return true
+                    if (!viewModel.isQsFullyExpanded) return false
+                    val pager = splitQsPagerState
+                    if (useSplitQsPages && pager != null) {
+                        return pager.currentPage < pager.pageCount - 1 ||
+                            (activeQsScrollState?.canScrollForward == true)
+                    }
+                    return (activeQsScrollState ?: scrollState).canScrollForward
                 }
 
                 override fun backward(): Boolean {
-                    return ((activeQsScrollState ?: scrollState).canScrollBackward &&
-                        viewModel.isQsFullyExpanded) ||
-                        isCustomizing
+                    if (isCustomizing) return true
+                    if (!viewModel.isQsFullyExpanded) return false
+                    val pager = splitQsPagerState
+                    if (useSplitQsPages && pager != null) {
+                        return pager.currentPage > 0 ||
+                            (activeQsScrollState?.canScrollBackward == true)
+                    }
+                    return (activeQsScrollState ?: scrollState).canScrollBackward
                 }
             }
+
+        val bottomCollapseZonePx = (56f * context.resources.displayMetrics.density).fastRoundToInt()
 
         val frame =
             FrameLayoutTouchPassthrough(
@@ -391,6 +413,10 @@ constructor(
                 isInBottomReservedArea = { x, y ->
                     viewModel.isEditing &&
                         bottomBarPositionInRoot.contains(IntOffset(x.toInt(), y.toInt()))
+                },
+                isInBottomCollapseZone = { y, viewHeight ->
+                    useSplitQsPages && !viewModel.isEditing &&
+                        y >= viewHeight - (bottomCollapseZonePx + bottomContentPadding)
                 },
                 allowPanelSwipe = {
                     axQsViewModel.panelSwipeEnabled &&
@@ -670,7 +696,14 @@ constructor(
             }
 
             val editProgress = sceneState.editModeTransitionProgress()
-            val headerAlpha = (1f - editProgress).coerceIn(0f, 1f)
+            val splitPageProgress =
+                if (useSplitQsPages) {
+                    splitQsPagerState?.let {
+                        (it.currentPage + it.currentPageOffsetFraction).coerceIn(0f, 1f)
+                    } ?: 0f
+                } else 0f
+            val pageHeaderAlpha = (1f - splitPageProgress * 1.45f).coerceIn(0f, 1f)
+            val headerAlpha = (1f - editProgress).coerceIn(0f, 1f) * pageHeaderAlpha
             if (useOverlayShadeHeader() && sceneState.shouldComposeLiveAxQs() && headerAlpha > 0f) {
                 CompositionLocalProvider(LocalMiuiQsHeaderMotion provides miuiHeaderMotion) {
                     QuickSettingsStatusOverlayHeader(
@@ -681,9 +714,9 @@ constructor(
                         modifier =
                             Modifier.graphicsLayer {
                                 alpha = headerAlpha
-                                scaleX = 1f - (editProgress * 0.08f)
-                                scaleY = 1f - (editProgress * 0.08f)
-                                translationY = -editProgress * 40f
+                                scaleX = 1f - (editProgress * 0.08f) - (splitPageProgress * 0.04f)
+                                scaleY = 1f - (editProgress * 0.08f) - (splitPageProgress * 0.04f)
+                                translationY = -editProgress * 40f - splitPageProgress * 28f
                             },
                     )
                 }
@@ -1181,20 +1214,23 @@ constructor(
                     )
         ) {
             if (viewModel.isQsEnabled) {
-                if (overlayShadeHeader) {
-                    Spacer(
-                        modifier =
-                            Modifier.requiredHeight(
-                                topPadding
-                            )
-                    )
-                } else {
-                    Spacer(
-                        modifier =
-                            Modifier.height {
-                                qsExtraPadding.roundToPx()
-                            }
-                    )
+                val splitPagesActive = useSplitQsPages && !sharedLayout
+                if (!splitPagesActive) {
+                    if (overlayShadeHeader) {
+                        Spacer(
+                            modifier =
+                                Modifier.requiredHeight(
+                                    topPadding
+                                )
+                        )
+                    } else {
+                        Spacer(
+                            modifier =
+                                Modifier.height {
+                                    qsExtraPadding.roundToPx()
+                                }
+                        )
+                    }
                 }
                 Element(
                     Elements.QuickSettingsContent,
@@ -1238,38 +1274,88 @@ constructor(
                                 .padding(bottom = 8.dp)
                                 .sysuiResTag(ResIdTags.qsScroll)
                     ) {
-                        AxQsMixedGrid(
-                            headerInOverlay = useTwoRowHeader,
-                            viewModel = viewModel,
-                            toolbarViewModel = toolbarViewModel,
-                            axQsViewModel = axQsViewModel,
-                            mediaViewModel = axMediaViewModel,
-                            qqs = false,
-                            listening = isListening,
-                            brightnessSliderViewModel =
-                                viewModel.containerViewModel.brightnessSliderViewModel,
-                            volumeSliderViewModel = volumeSliderViewModel,
-                            scrollState = scrollState,
-                            sharedLayout = sharedLayout,
-                            holdExpandedContent = {
-                                isSeparateShade && currentPanelSwipeProgress < 0f &&
-                                    sceneExpansionState.progress == 1f
-                            },
-                            onCollapsedHeightChanged = onCollapsedHeightChanged,
-                            collapsedHeaderOffset = collapsedHeaderOffset,
-                            panelSwipeProgress = { currentPanelSwipeProgress },
-                            panelSwipeFromQs = { panelSwipeFromQs },
-                            expansionFromLeft = { qsGestureFromLeft },
-                            animationResetSequence = {
-                                miuiAnimationResetSequence +
-                                    if (sharedLayout || viewModel.isInSplitShade || isSeparateShade) 0
-                                    else miuiQsSceneResetSequence
-                            },
-                            modifier =
-                                Modifier.fillMaxSize()
-                                    .sysuiResTag(ResIdTags.quickSettingsPanel)
-                                    .graphicsLayer {},
-                        )
+                        if (splitPagesActive) {
+                            val pagerState =
+                                rememberPagerState(
+                                    initialPage = 0,
+                                    pageCount = { LunarisSplitQsPage.entries.size },
+                                )
+                            SideEffect { splitQsPagerState = pagerState }
+                            DisposableEffect(Unit) {
+                                onDispose {
+                                    if (splitQsPagerState === pagerState) {
+                                        splitQsPagerState = null
+                                    }
+                                    activeQsScrollState = null
+                                }
+                            }
+                            LunarisSplitQsPager(
+                                pagerState = pagerState,
+                                viewModel = viewModel,
+                                toolbarViewModel = toolbarViewModel,
+                                axQsViewModel = axQsViewModel,
+                                mediaViewModel = axMediaViewModel,
+                                brightnessSliderViewModel =
+                                    viewModel.containerViewModel.brightnessSliderViewModel,
+                                volumeSliderViewModel = volumeSliderViewModel,
+                                mainScrollState = scrollState,
+                                headerInOverlay = useTwoRowHeader,
+                                topPadding = if (overlayShadeHeader) topPadding else qsExtraPadding,
+                                listening = isListening,
+                                holdExpandedContent = {
+                                    isSeparateShade && currentPanelSwipeProgress < 0f &&
+                                        sceneExpansionState.progress == 1f
+                                },
+                                panelSwipeProgress = { currentPanelSwipeProgress },
+                                panelSwipeFromQs = { panelSwipeFromQs },
+                                expansionFromLeft = { qsGestureFromLeft },
+                                animationResetSequence = { miuiAnimationResetSequence },
+                                onEditPage = { layout ->
+                                    pendingEditLayout = layout
+                                    viewModel.containerViewModel.editModeViewModel.startEditing()
+                                },
+                                onActiveScrollStateChanged = { state ->
+                                    activeQsScrollState = state
+                                },
+                                modifier =
+                                    Modifier.fillMaxSize()
+                                        .sysuiResTag(ResIdTags.quickSettingsPanel)
+                                        .graphicsLayer {},
+                            )
+                        } else {
+                            AxQsMixedGrid(
+                                headerInOverlay = useTwoRowHeader,
+                                viewModel = viewModel,
+                                toolbarViewModel = toolbarViewModel,
+                                axQsViewModel = axQsViewModel,
+                                mediaViewModel = axMediaViewModel,
+                                qqs = false,
+                                listening = isListening,
+                                brightnessSliderViewModel =
+                                    viewModel.containerViewModel.brightnessSliderViewModel,
+                                volumeSliderViewModel = volumeSliderViewModel,
+                                scrollState = scrollState,
+                                sharedLayout = sharedLayout,
+                                holdExpandedContent = {
+                                    isSeparateShade && currentPanelSwipeProgress < 0f &&
+                                        sceneExpansionState.progress == 1f
+                                },
+                                onCollapsedHeightChanged = onCollapsedHeightChanged,
+                                collapsedHeaderOffset = collapsedHeaderOffset,
+                                panelSwipeProgress = { currentPanelSwipeProgress },
+                                panelSwipeFromQs = { panelSwipeFromQs },
+                                expansionFromLeft = { qsGestureFromLeft },
+                                animationResetSequence = {
+                                    miuiAnimationResetSequence +
+                                        if (sharedLayout || viewModel.isInSplitShade || isSeparateShade) 0
+                                        else miuiQsSceneResetSequence
+                                },
+                                modifier =
+                                    Modifier.fillMaxSize()
+                                        .sysuiResTag(ResIdTags.quickSettingsPanel)
+                                        .graphicsLayer {},
+                            )
+                        }
                     }
                 }
                 if (compactStyle) {
@@ -1317,6 +1403,17 @@ constructor(
             else editModeViewModel.stopEditing()
         }
 
+        DisposableEffect(Unit) {
+            onDispose { pendingEditLayout = null }
+        }
+        val initialEditLayout =
+            pendingEditLayout
+                ?: if (useSplitQsPages) {
+                    splitQsPagerState?.let {
+                        LunarisSplitQsPage.fromIndex(it.currentPage).editLayout
+                    }
+                } else null
+
         AnimatedContent(
             targetState = showPanelSettings,
             modifier = modifier.fillMaxSize().padding(top = { viewModel.qqsHeaderHeight }),
@@ -1362,6 +1459,7 @@ constructor(
                         },
                         animateItemBounds = true,
                         splitShade = viewModel.isInSplitShade,
+                        initialLayout = initialEditLayout,
                         onResetTiles = { editTilesResetInteractor.reset() },
                     )
                 }
@@ -1662,6 +1760,7 @@ private class FrameLayoutTouchPassthrough(
     private val logBuffer: TableLogBuffer,
     private val backgroundDispatcher: CoroutineDispatcher,
     private val isInBottomReservedArea: (Float, Float) -> Boolean,
+    private val isInBottomCollapseZone: (Float, Int) -> Boolean,
     private val allowPanelSwipe: () -> Boolean,
     private val isBrightnessMirrorShowing: () -> Boolean,
     private val miuiQsMotionController: MiuiQsMotionController,
@@ -1787,11 +1886,15 @@ private class FrameLayoutTouchPassthrough(
     var downY = 0f
     var downX = 0f
     var preventingIntercept = false
+    private var startedInBottomCollapseZone = false
 
     val tilePanelSwipeGesture = QsTilePanelSwipeGesture(touchSlop.toFloat())
 
     fun onQsScrollGestureStart() {
-        preventingIntercept = canScrollQs.forward()
+        preventingIntercept =
+            !startedInBottomCollapseZone &&
+                !allowPanelSwipe() &&
+                (canScrollQs.forward() || canScrollQs.backward())
         parent?.requestDisallowInterceptTouchEvent(preventingIntercept)
     }
 
@@ -1820,6 +1923,7 @@ private class FrameLayoutTouchPassthrough(
             MotionEvent.ACTION_DOWN -> {
                 miuiQsMotionController.beginInteraction()
                 canScrollQs.reset()
+                startedInBottomCollapseZone = isInBottomCollapseZone(event.y, height)
                 tilePanelSwipeGesture.onDown(event.x, event.y)
             }
             MotionEvent.ACTION_MOVE -> tilePanelSwipeGesture.onMove(event.x, event.y)
@@ -1836,6 +1940,7 @@ private class FrameLayoutTouchPassthrough(
                 event.actionMasked == MotionEvent.ACTION_CANCEL
         ) {
             canScrollQs.reset()
+            startedInBottomCollapseZone = false
             tilePanelSwipeGesture.reset()
             miuiQsMotionController.endInteraction()
         }
@@ -1860,14 +1965,14 @@ private class FrameLayoutTouchPassthrough(
         when (action) {
             MotionEvent.ACTION_DOWN -> {
                 preventingIntercept = false
-                if (canScrollQs.forward() && !allowPanelSwipe()) {
-                    // If we can scroll down, make sure we're not intercepted by the parent
+                if (
+                    !startedInBottomCollapseZone &&
+                        (canScrollQs.forward() || canScrollQs.backward()) &&
+                        !allowPanelSwipe()
+                ) {
                     preventingIntercept = true
                     parent?.requestDisallowInterceptTouchEvent(true)
                 } else if (!canScrollQs.backward()) {
-                    // Don't pass on the touch to the view, because scrolling will unconditionally
-                    // disallow interception even if we can't scroll.
-                    // if a user can't scroll at all, we should never listen to the touch.
                     return false
                 }
             }
@@ -1894,8 +1999,11 @@ private class FrameLayoutTouchPassthrough(
         when (action) {
             MotionEvent.ACTION_DOWN -> {
                 preventingIntercept = false
-                // If we can scroll down, make sure none of our parents intercepts us.
-                if (canScrollQs.forward() && !allowPanelSwipe()) {
+                if (
+                    !startedInBottomCollapseZone &&
+                        (canScrollQs.forward() || canScrollQs.backward()) &&
+                        !allowPanelSwipe()
+                ) {
                     preventingIntercept = true
                     parent?.requestDisallowInterceptTouchEvent(true)
                 }
@@ -1908,11 +2016,13 @@ private class FrameLayoutTouchPassthrough(
                 val x = ev.x
                 val yDiff = y - downY
                 val xDiff = x - downX
-                val collapsing = yDiff < -touchSlop && !canScrollQs.forward()
+                val canPageUp = !startedInBottomCollapseZone && canScrollQs.forward()
+                val canPageDown = canScrollQs.backward()
+                val collapsing = yDiff < -touchSlop && !canPageUp
                 val vertical = Math.abs(xDiff) < Math.abs(yDiff)
                 if (
-                    allowPanelSwipe() && vertical && Math.abs(yDiff) > touchSlop &&
-                        canScrollQs.forward()
+                    vertical && Math.abs(yDiff) > touchSlop &&
+                        ((yDiff < 0 && canPageUp) || (yDiff > 0 && canPageDown))
                 ) {
                     preventingIntercept = true
                     parent?.requestDisallowInterceptTouchEvent(true)
@@ -1924,6 +2034,8 @@ private class FrameLayoutTouchPassthrough(
                     parent?.requestDisallowInterceptTouchEvent(false)
                 }
                 if (collapsing && vertical) {
+                    preventingIntercept = false
+                    parent?.requestDisallowInterceptTouchEvent(false)
                     return true
                 }
             }

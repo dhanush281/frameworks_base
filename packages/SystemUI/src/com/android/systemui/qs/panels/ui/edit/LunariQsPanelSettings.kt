@@ -132,12 +132,16 @@ fun LunariQsPanelSettings(
     isSplitShade: Boolean = false,
 ) {
     var selectedLayout by rememberSaveable(initialLayout) { mutableStateOf(initialLayout) }
+    val separate = viewModel.panelMode == AxQsPanelMode.SEPARATE
     val layout =
-        if (viewModel.useSharedQsLayout && selectedLayout == AxQsLayout.QQS) AxQsLayout.QS
-        else selectedLayout
+        when {
+            viewModel.useSharedQsLayout && selectedLayout == AxQsLayout.QQS -> AxQsLayout.QS
+            selectedLayout.isSplitQsExtraPage && (!separate || isSplitShade || !viewModel.splitQsPages) ->
+                AxQsLayout.QS
+            else -> selectedLayout
+        }
     val title = stringResource(R.string.ax_qs_panel_settings)
     val defaults = remember { LunarisQsSpacing() }
-    val separate = viewModel.panelMode == AxQsPanelMode.SEPARATE
     val gradientSettings = viewModel.gradientSettings
     val gradientEnabled = gradientSettings.enabled
     val gradientScope =
@@ -160,12 +164,16 @@ fun LunariQsPanelSettings(
         when (layout) {
             AxQsLayout.QQS -> AxQsGridLayout.PORTRAIT_QQS_CONTROLS
             AxQsLayout.QS -> AxQsGridLayout.PORTRAIT_QS_CONTROLS
+            AxQsLayout.QS_NETWORK -> AxQsGridLayout.PORTRAIT_QS_NETWORK_CONTROLS
+            AxQsLayout.QS_CUSTOM -> AxQsGridLayout.PORTRAIT_QS_CUSTOM_CONTROLS
             AxQsLayout.SPLIT_SHADE -> AxQsGridLayout.SPLIT_SHADE_CONTROLS
         }
     val tiles =
         when (layout) {
             AxQsLayout.QQS -> AxQsGridLayout.PORTRAIT_QQS_TILES
             AxQsLayout.QS -> AxQsGridLayout.PORTRAIT_QS_TILES
+            AxQsLayout.QS_NETWORK -> AxQsGridLayout.PORTRAIT_QS_NETWORK_TILES
+            AxQsLayout.QS_CUSTOM -> AxQsGridLayout.PORTRAIT_QS_CUSTOM_TILES
             AxQsLayout.SPLIT_SHADE -> AxQsGridLayout.SPLIT_SHADE_TILES
         }
 
@@ -622,6 +630,14 @@ fun LunariQsPanelSettings(
                             onCheckedChange = viewModel::setTwoRowHeader,
                         )
                     }
+                    item("split_qs_pages") {
+                        SettingsSwitch(
+                            title = stringResource(R.string.lunaris_qs_split_pages),
+                            summary = stringResource(R.string.lunaris_qs_split_pages_summary),
+                            checked = viewModel.splitQsPages,
+                            onCheckedChange = viewModel::setSplitQsPages,
+                        )
+                    }
                 }
                 item("panel_swipe") {
                     SettingsSwitch(
@@ -720,7 +736,8 @@ fun LunariQsPanelSettings(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         AxQsLayout.entries.filter {
-                            !viewModel.useSharedQsLayout || it != AxQsLayout.QQS
+                            (!viewModel.useSharedQsLayout || it != AxQsLayout.QQS) &&
+                                (!it.isSplitQsExtraPage || (separate && !isSplitShade && viewModel.splitQsPages))
                         }.forEach { option ->
                             FilterChip(
                                 selected = layout == option,
@@ -731,6 +748,10 @@ fun LunariQsPanelSettings(
                                             when (option) {
                                                 AxQsLayout.QQS -> R.string.ax_qs_settings_layout_top
                                                 AxQsLayout.QS -> R.string.ax_qs_settings_layout_full
+                                                AxQsLayout.QS_NETWORK ->
+                                                    R.string.ax_qs_settings_layout_network
+                                                AxQsLayout.QS_CUSTOM ->
+                                                    R.string.ax_qs_settings_layout_custom
                                                 AxQsLayout.SPLIT_SHADE ->
                                                     R.string.ax_qs_settings_layout_large
                                             }

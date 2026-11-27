@@ -33,6 +33,7 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -202,6 +203,7 @@ internal fun <T> ContentScope.AxQS(
     showWeather: Boolean = true,
     compactStyle: Boolean = false,
     autoHideTilePageIndicator: Boolean = false,
+    centerVertically: Boolean = false,
     modifier: Modifier = Modifier,
     controlContent: @Composable (AxQsGridItem<T>) -> Unit,
     tileContent: @Composable (AxQsGridItem<T>) -> Unit,
@@ -226,59 +228,69 @@ internal fun <T> ContentScope.AxQS(
                 bottomSpacing = spacing,
             )
         }
-        Column(
-            modifier =
-                Modifier.weight(1f)
-                    .fillMaxWidth()
-                    .qsTouchBounds()
-                    .dynamicPadding(
-                        start = { -scrollOverflow.roundToPx() },
-                        end = { -scrollOverflow.roundToPx() },
-                        top = { -entranceOverflow.roundToPx() },
-                    )
-                    .clipScrollableContainer(Orientation.Vertical)
-                    .verticalScroll(scrollState, overscrollEffect = null),
-        ) {
+        BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            val minContentHeight =
+                if (centerVertically && constraints.hasBoundedHeight) maxHeight else 0.dp
             Column(
                 modifier =
-                    Modifier.padding(
-                        start = scrollOverflow, end = scrollOverflow, top = entranceOverflow
-                    )
-                        .element(AxQsGridContent),
-                verticalArrangement = Arrangement.spacedBy(spacing),
+                    Modifier.fillMaxSize()
+                        .qsTouchBounds()
+                        .dynamicPadding(
+                            start = { -scrollOverflow.roundToPx() },
+                            end = { -scrollOverflow.roundToPx() },
+                            top = { -entranceOverflow.roundToPx() },
+                        )
+                        .clipScrollableContainer(Orientation.Vertical)
+                        .verticalScroll(scrollState, overscrollEffect = null),
             ) {
-                if (controlItems.isNotEmpty()) {
-                    AxQsGrid(
-                        items = controlItems,
-                        columns = controlColumns,
-                        rowHeight = rowHeight,
-                        spacing = spacing,
-                        maxRows = controlRows,
-                        squareCells = circleCells,
-                        modifier = Modifier.fillMaxWidth(),
-                        content = controlContent,
-                    )
-                }
-                if (tileItems.isNotEmpty()) {
-                    Column {
-                        AxQsTileGrid(
-                            items = tileItems,
-                            columns = tileColumns,
-                            rows = tileRows,
+                Column(
+                    modifier =
+                        Modifier.fillMaxWidth()
+                            .heightIn(min = minContentHeight)
+                            .padding(
+                                start = scrollOverflow, end = scrollOverflow, top = entranceOverflow
+                            )
+                            .then(if (centerVertically) Modifier else Modifier.element(AxQsGridContent)),
+                    verticalArrangement =
+                        if (centerVertically) {
+                            Arrangement.spacedBy(spacing, Alignment.CenterVertically)
+                        } else {
+                            Arrangement.spacedBy(spacing)
+                        },
+                ) {
+                    if (controlItems.isNotEmpty()) {
+                        AxQsGrid(
+                            items = controlItems,
+                            columns = controlColumns,
+                            rowHeight = rowHeight,
                             spacing = spacing,
-                            showLabels = showTileLabels,
-                            circleCells = circleCells,
-                            pagerState = pagerState,
+                            maxRows = controlRows,
+                            squareCells = circleCells,
                             modifier = Modifier.fillMaxWidth(),
-                            content = tileContent,
-                            label = tileLabel,
+                            content = controlContent,
                         )
-                        AxQsPagerIndicator(
-                            pagerState = pagerState,
-                            autoHide = autoHideTilePageIndicator,
-                            isVisible = isFullyVisible,
-                            modifier = Modifier.fillMaxWidth().padding(top = spacing),
-                        )
+                    }
+                    if (tileItems.isNotEmpty()) {
+                        Column {
+                            AxQsTileGrid(
+                                items = tileItems,
+                                columns = tileColumns,
+                                rows = tileRows,
+                                spacing = spacing,
+                                showLabels = showTileLabels,
+                                circleCells = circleCells,
+                                pagerState = pagerState,
+                                modifier = Modifier.fillMaxWidth(),
+                                content = tileContent,
+                                label = tileLabel,
+                            )
+                            AxQsPagerIndicator(
+                                pagerState = pagerState,
+                                autoHide = autoHideTilePageIndicator,
+                                isVisible = isFullyVisible,
+                                modifier = Modifier.fillMaxWidth().padding(top = spacing),
+                            )
+                        }
                     }
                 }
             }

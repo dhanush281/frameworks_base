@@ -132,18 +132,28 @@ constructor(
     val qqsTileOrder: StateFlow<List<String>?> = orderSetting(QQS_TILE_ORDER)
     val qsControlOrder: StateFlow<List<String>?> = orderSetting(QS_CONTROL_ORDER, DEFAULT_CONTROLS_STRING)
     val qsTileOrder: StateFlow<List<String>?> = orderSetting(QS_TILE_ORDER)
+    val qsNetworkControlOrder: StateFlow<List<String>?> = orderSetting(QS_NETWORK_CONTROL_ORDER)
+    val qsNetworkTileOrder: StateFlow<List<String>?> = orderSetting(QS_NETWORK_TILE_ORDER)
+    val qsCustomControlOrder: StateFlow<List<String>?> = orderSetting(QS_CUSTOM_CONTROL_ORDER)
+    val qsCustomTileOrder: StateFlow<List<String>?> = orderSetting(QS_CUSTOM_TILE_ORDER)
     val landscapeControlOrder: StateFlow<List<String>?> = orderSetting(LANDSCAPE_CONTROL_ORDER, DEFAULT_CONTROLS_STRING)
     val landscapeTileOrder: StateFlow<List<String>?> = orderSetting(LANDSCAPE_TILE_ORDER)
     val splitShadeControlOrder: StateFlow<List<String>?> = orderSetting(SPLIT_SHADE_CONTROL_ORDER, DEFAULT_CONTROLS_STRING)
     val splitShadeTileOrder: StateFlow<List<String>?> = orderSetting(SPLIT_SHADE_TILE_ORDER)
 
     val qsSpans: StateFlow<Map<String, AxQsSpan>> = spansSetting(QS_SPANS)
+    val qsNetworkSpans: StateFlow<Map<String, AxQsSpan>> = spansSetting(QS_NETWORK_SPANS, "")
+    val qsCustomSpans: StateFlow<Map<String, AxQsSpan>> = spansSetting(QS_CUSTOM_SPANS, "")
     val qqsSpans: StateFlow<Map<String, AxQsSpan>> = spansSetting(QQS_SPANS)
     val landscapeSpans: StateFlow<Map<String, AxQsSpan>> = spansSetting(LANDSCAPE_SPANS)
     val splitShadeSpans: StateFlow<Map<String, AxQsSpan>> = spansSetting(SPLIT_SHADE_SPANS)
 
     val qqsControlPositions: StateFlow<Map<String, AxQsGridPosition>> = positionsSetting(QQS_CONTROL_POSITIONS)
     val qsControlPositions: StateFlow<Map<String, AxQsGridPosition>> = positionsSetting(QS_CONTROL_POSITIONS)
+    val qsNetworkControlPositions: StateFlow<Map<String, AxQsGridPosition>> =
+        positionsSetting(QS_NETWORK_CONTROL_POSITIONS)
+    val qsCustomControlPositions: StateFlow<Map<String, AxQsGridPosition>> =
+        positionsSetting(QS_CUSTOM_CONTROL_POSITIONS)
     val landscapeControlPositions: StateFlow<Map<String, AxQsGridPosition>> = positionsSetting(LANDSCAPE_CONTROL_POSITIONS)
     val splitShadeControlPositions: StateFlow<Map<String, AxQsGridPosition>> = positionsSetting(SPLIT_SHADE_CONTROL_POSITIONS)
 
@@ -189,6 +199,10 @@ constructor(
     val twoRowHeader = boolSetting(TWO_ROW_HEADER, false)
 
     fun setTwoRowHeader(enabled: Boolean) = putInt(TWO_ROW_HEADER, enabled.toSetting())
+
+    val splitQsPages: StateFlow<Boolean> = boolSetting(SPLIT_QS_PAGES, false)
+
+    fun setSplitQsPages(enabled: Boolean) = putInt(SPLIT_QS_PAGES, enabled.toSetting())
 
     val quickPanelOnLeft: StateFlow<Boolean> = boolSetting(QUICK_PANEL_ON_LEFT, false)
     val panelSwipeEnabled: StateFlow<Boolean> = boolSetting(PANEL_SWIPE_ENABLED, false)
@@ -705,7 +719,9 @@ constructor(
         val valuesToSet = buildMap {
             CONTROL_ORDER_KEYS.forEach { put(it, controlsValue) }
             TILE_ORDER_KEYS.forEach { put(it, tilesValue) }
-            SPANS_KEYS.values.forEach { put(it, DEFAULT_SPANS_STRING) }
+            SPANS_KEYS.forEach { (layout, key) ->
+                put(key, if (layout.isSplitQsExtraPage) "" else DEFAULT_SPANS_STRING)
+            }
             put(LANDSCAPE_SPANS, DEFAULT_SPANS_STRING)
             CONTROL_POSITIONS_KEYS.values.forEach { put(it, "") }
             put(LANDSCAPE_CONTROL_POSITIONS, "")
@@ -718,6 +734,9 @@ constructor(
             valuesToSet.forEach { (key, value) ->
                 secureSettings.putStringForUser(key, value, null, false, userId, true)
             }
+            EXTRA_PAGE_ORDER_KEYS.forEach { key ->
+                secureSettings.putStringForUser(key, null, null, false, userId, true)
+            }
         }
     }
 
@@ -728,6 +747,9 @@ constructor(
                 secureSettings.getStringForUser(key, userId)
             }
             TILE_ORDER_KEYS.forEach { key ->
+                secureSettings.getStringForUser(key, userId)
+            }
+            EXTRA_PAGE_ORDER_KEYS.forEach { key ->
                 secureSettings.getStringForUser(key, userId)
             }
             SPANS_KEYS.values.forEach { key ->
@@ -742,18 +764,22 @@ constructor(
             .distinctUntilChanged()
             .stateIn(applicationScope, SharingStarted.Eagerly, parseOrder(default))
 
-    private fun spansSetting(key: String): StateFlow<Map<String, AxQsSpan>> {
+    private fun spansSetting(
+        key: String,
+        default: String = DEFAULT_SPANS_STRING,
+    ): StateFlow<Map<String, AxQsSpan>> {
         val values =
             if (key == SPLIT_SHADE_SPANS) {
                 combine(stringSetting(LANDSCAPE_SPANS, DEFAULT_SPANS_STRING), stringSetting(key)) {
                     inherited, current -> listOfNotNull(inherited, current).joinToString(",")
                 }
             } else {
-                stringSetting(key, DEFAULT_SPANS_STRING)
+                stringSetting(key, default)
             }
+        val initial = if (default == DEFAULT_SPANS_STRING) defaultControlSpans else emptyMap()
         return combine(values, controlOrderSetting(key), ::parseSpans)
             .distinctUntilChanged()
-            .stateIn(applicationScope, SharingStarted.Eagerly, defaultControlSpans)
+            .stateIn(applicationScope, SharingStarted.Eagerly, initial)
     }
 
     private fun positionsSetting(key: String): StateFlow<Map<String, AxQsGridPosition>> =
@@ -765,6 +791,8 @@ constructor(
         when (key) {
             QQS_SPANS, QQS_CONTROL_POSITIONS -> listOf(QQS_CONTROL_ORDER, QQS_ORDER)
             QS_SPANS, QS_CONTROL_POSITIONS -> listOf(QS_CONTROL_ORDER, QS_ORDER)
+            QS_NETWORK_SPANS, QS_NETWORK_CONTROL_POSITIONS -> listOf(QS_NETWORK_CONTROL_ORDER)
+            QS_CUSTOM_SPANS, QS_CUSTOM_CONTROL_POSITIONS -> listOf(QS_CUSTOM_CONTROL_ORDER)
             LANDSCAPE_SPANS, LANDSCAPE_CONTROL_POSITIONS ->
                 listOf(LANDSCAPE_CONTROL_ORDER, LANDSCAPE_ORDER)
             SPLIT_SHADE_SPANS, SPLIT_SHADE_CONTROL_POSITIONS ->
@@ -1039,6 +1067,8 @@ constructor(
             when (slider.layout) {
                 AxQsLayout.QQS -> "ax_qqs"
                 AxQsLayout.QS -> "ax_qs"
+                AxQsLayout.QS_NETWORK -> "ax_qs_network"
+                AxQsLayout.QS_CUSTOM -> "ax_qs_custom"
                 AxQsLayout.SPLIT_SHADE -> "ax_qs_split_shade"
             }
         return when (slider.control) {
@@ -1053,6 +1083,8 @@ constructor(
         const val QS_ORDER = "ax_qs_order"
         const val QQS_ORDER = "ax_qqs_order"
         const val QS_SPANS = "ax_qs_spans"
+        const val QS_NETWORK_SPANS = "ax_qs_network_spans"
+        const val QS_CUSTOM_SPANS = "ax_qs_custom_spans"
         const val QQS_SPANS = "ax_qqs_spans"
         const val LANDSCAPE_ORDER = "ax_qs_landscape_order"
         const val LANDSCAPE_SPANS = "ax_qs_landscape_spans"
@@ -1060,12 +1092,18 @@ constructor(
         const val QQS_TILE_ORDER = "ax_qqs_tile_order"
         const val QS_CONTROL_ORDER = "ax_qs_control_order"
         const val QS_TILE_ORDER = "ax_qs_tile_order"
+        const val QS_NETWORK_CONTROL_ORDER = "ax_qs_network_control_order"
+        const val QS_NETWORK_TILE_ORDER = "ax_qs_network_tile_order"
+        const val QS_CUSTOM_CONTROL_ORDER = "ax_qs_custom_control_order"
+        const val QS_CUSTOM_TILE_ORDER = "ax_qs_custom_tile_order"
         const val LANDSCAPE_CONTROL_ORDER = "ax_qs_landscape_control_order"
         const val LANDSCAPE_TILE_ORDER = "ax_qs_landscape_tile_order"
         const val SPLIT_SHADE_CONTROL_ORDER = "ax_qs_split_shade_control_order"
         const val SPLIT_SHADE_TILE_ORDER = "ax_qs_split_shade_tile_order"
         const val QQS_CONTROL_POSITIONS = "ax_qqs_control_positions"
         const val QS_CONTROL_POSITIONS = "ax_qs_control_positions"
+        const val QS_NETWORK_CONTROL_POSITIONS = "ax_qs_network_control_positions"
+        const val QS_CUSTOM_CONTROL_POSITIONS = "ax_qs_custom_control_positions"
         const val LANDSCAPE_CONTROL_POSITIONS = "ax_qs_landscape_control_positions"
         const val SPLIT_SHADE_CONTROL_POSITIONS = "ax_qs_split_shade_control_positions"
         const val SPLIT_SHADE_SPANS = "ax_qs_split_shade_spans"
@@ -1073,6 +1111,7 @@ constructor(
         const val PANEL_SWIPE_ENABLED = "lunaris_qs_panel_swipe_enabled"
         const val MIUI_QS_ANIMATION = "lunaris_qs_miui_animation"
         const val TWO_ROW_HEADER = "lunaris_qs_two_row_header"
+        const val SPLIT_QS_PAGES = "lunaris_qs_split_pages"
         const val MIUI_SPLIT_QS_ANIMATION = "lunaris_qs_miui_split_animation"
         const val SHARED_QS_LAYOUT = "lunaris_qs_shared_layout"
         const val COMPACT_STYLE = "ax_qs_compact_style"
@@ -1081,12 +1120,20 @@ constructor(
         const val PORTRAIT_QQS_TILE_COLUMNS = "ax_qqs_tile_columns"
         const val PORTRAIT_QS_CONTROL_COLUMNS = "ax_qs_control_columns"
         const val PORTRAIT_QS_TILE_COLUMNS = "ax_qs_tile_columns"
+        const val PORTRAIT_QS_NETWORK_CONTROL_COLUMNS = "ax_qs_network_control_columns"
+        const val PORTRAIT_QS_NETWORK_TILE_COLUMNS = "ax_qs_network_tile_columns"
+        const val PORTRAIT_QS_CUSTOM_CONTROL_COLUMNS = "ax_qs_custom_control_columns"
+        const val PORTRAIT_QS_CUSTOM_TILE_COLUMNS = "ax_qs_custom_tile_columns"
         const val SPLIT_SHADE_CONTROL_COLUMNS = "ax_qs_split_shade_control_columns"
         const val SPLIT_SHADE_TILE_COLUMNS = "ax_qs_split_shade_tile_columns"
         const val PORTRAIT_QQS_TILE_ROWS = "ax_qqs_tile_rows"
         const val PORTRAIT_QS_TILE_ROWS = "ax_qs_tile_rows"
+        const val PORTRAIT_QS_NETWORK_TILE_ROWS = "ax_qs_network_tile_rows"
+        const val PORTRAIT_QS_CUSTOM_TILE_ROWS = "ax_qs_custom_tile_rows"
         const val SPLIT_SHADE_TILE_ROWS = "ax_qs_split_shade_tile_rows"
         const val PORTRAIT_QS_TILE_LABELS = "ax_qs_show_tile_labels"
+        const val PORTRAIT_QS_NETWORK_TILE_LABELS = "ax_qs_network_show_tile_labels"
+        const val PORTRAIT_QS_CUSTOM_TILE_LABELS = "ax_qs_custom_show_tile_labels"
         const val SPLIT_SHADE_TILE_LABELS = "ax_qs_split_shade_show_tile_labels"
         const val SHOW_WEATHER = "ax_qs_show_weather"
         private const val AUTO_HIDE_TILE_PAGE_INDICATOR = "ax_qs_auto_hide_tile_page_indicator"
@@ -1130,6 +1177,8 @@ constructor(
         val TILE_LABEL_KEYS =
             mapOf(
                 AxQsGridLayout.PORTRAIT_QS_TILES to PORTRAIT_QS_TILE_LABELS,
+                AxQsGridLayout.PORTRAIT_QS_NETWORK_TILES to PORTRAIT_QS_NETWORK_TILE_LABELS,
+                AxQsGridLayout.PORTRAIT_QS_CUSTOM_TILES to PORTRAIT_QS_CUSTOM_TILE_LABELS,
                 AxQsGridLayout.SPLIT_SHADE_TILES to SPLIT_SHADE_TILE_LABELS,
             )
 
@@ -1147,6 +1196,13 @@ constructor(
             SPLIT_SHADE_TILE_ORDER,
         )
 
+        val EXTRA_PAGE_ORDER_KEYS = listOf(
+            QS_NETWORK_CONTROL_ORDER,
+            QS_NETWORK_TILE_ORDER,
+            QS_CUSTOM_CONTROL_ORDER,
+            QS_CUSTOM_TILE_ORDER,
+        )
+
         val LEGACY_ORDER_KEYS = listOf(
             QS_ORDER,
             QQS_ORDER,
@@ -1157,6 +1213,8 @@ constructor(
             mapOf(
                 AxQsLayout.QQS to "lunaris_qqs_tile_folders",
                 AxQsLayout.QS to "lunaris_qs_tile_folders",
+                AxQsLayout.QS_NETWORK to "lunaris_qs_network_tile_folders",
+                AxQsLayout.QS_CUSTOM to "lunaris_qs_custom_tile_folders",
                 AxQsLayout.SPLIT_SHADE to "lunaris_qs_split_shade_tile_folders",
             )
 
@@ -1164,6 +1222,8 @@ constructor(
             mapOf(
                 AxQsLayout.QQS to "ax_qqs_tile_stacks",
                 AxQsLayout.QS to "ax_qs_tile_stacks",
+                AxQsLayout.QS_NETWORK to "ax_qs_network_tile_stacks",
+                AxQsLayout.QS_CUSTOM to "ax_qs_custom_tile_stacks",
                 AxQsLayout.SPLIT_SHADE to "ax_qs_split_shade_tile_stacks",
             )
 
@@ -1171,12 +1231,16 @@ constructor(
             mapOf(
                 AxQsLayout.QQS to QQS_SPANS,
                 AxQsLayout.QS to QS_SPANS,
+                AxQsLayout.QS_NETWORK to QS_NETWORK_SPANS,
+                AxQsLayout.QS_CUSTOM to QS_CUSTOM_SPANS,
                 AxQsLayout.SPLIT_SHADE to SPLIT_SHADE_SPANS,
             )
 
         val CONTROL_POSITIONS_KEYS = mapOf(
             AxQsLayout.QQS to QQS_CONTROL_POSITIONS,
             AxQsLayout.QS to QS_CONTROL_POSITIONS,
+            AxQsLayout.QS_NETWORK to QS_NETWORK_CONTROL_POSITIONS,
+            AxQsLayout.QS_CUSTOM to QS_CUSTOM_CONTROL_POSITIONS,
             AxQsLayout.SPLIT_SHADE to SPLIT_SHADE_CONTROL_POSITIONS,
         )
 
@@ -1185,6 +1249,10 @@ constructor(
             (AxQsLayout.QQS to AxQsGridSection.TILES) to QQS_TILE_ORDER,
             (AxQsLayout.QS to AxQsGridSection.CONTROLS) to QS_CONTROL_ORDER,
             (AxQsLayout.QS to AxQsGridSection.TILES) to QS_TILE_ORDER,
+            (AxQsLayout.QS_NETWORK to AxQsGridSection.CONTROLS) to QS_NETWORK_CONTROL_ORDER,
+            (AxQsLayout.QS_NETWORK to AxQsGridSection.TILES) to QS_NETWORK_TILE_ORDER,
+            (AxQsLayout.QS_CUSTOM to AxQsGridSection.CONTROLS) to QS_CUSTOM_CONTROL_ORDER,
+            (AxQsLayout.QS_CUSTOM to AxQsGridSection.TILES) to QS_CUSTOM_TILE_ORDER,
             (AxQsLayout.SPLIT_SHADE to AxQsGridSection.CONTROLS) to SPLIT_SHADE_CONTROL_ORDER,
             (AxQsLayout.SPLIT_SHADE to AxQsGridSection.TILES) to SPLIT_SHADE_TILE_ORDER,
         )
@@ -1194,6 +1262,10 @@ constructor(
             AxQsGridLayout.PORTRAIT_QQS_TILES to PORTRAIT_QQS_TILE_COLUMNS,
             AxQsGridLayout.PORTRAIT_QS_CONTROLS to PORTRAIT_QS_CONTROL_COLUMNS,
             AxQsGridLayout.PORTRAIT_QS_TILES to PORTRAIT_QS_TILE_COLUMNS,
+            AxQsGridLayout.PORTRAIT_QS_NETWORK_CONTROLS to PORTRAIT_QS_NETWORK_CONTROL_COLUMNS,
+            AxQsGridLayout.PORTRAIT_QS_NETWORK_TILES to PORTRAIT_QS_NETWORK_TILE_COLUMNS,
+            AxQsGridLayout.PORTRAIT_QS_CUSTOM_CONTROLS to PORTRAIT_QS_CUSTOM_CONTROL_COLUMNS,
+            AxQsGridLayout.PORTRAIT_QS_CUSTOM_TILES to PORTRAIT_QS_CUSTOM_TILE_COLUMNS,
             AxQsGridLayout.SPLIT_SHADE_CONTROLS to SPLIT_SHADE_CONTROL_COLUMNS,
             AxQsGridLayout.SPLIT_SHADE_TILES to SPLIT_SHADE_TILE_COLUMNS,
         )
@@ -1201,6 +1273,8 @@ constructor(
         val GRID_ROWS_KEYS = mapOf(
             AxQsGridLayout.PORTRAIT_QQS_TILES to PORTRAIT_QQS_TILE_ROWS,
             AxQsGridLayout.PORTRAIT_QS_TILES to PORTRAIT_QS_TILE_ROWS,
+            AxQsGridLayout.PORTRAIT_QS_NETWORK_TILES to PORTRAIT_QS_NETWORK_TILE_ROWS,
+            AxQsGridLayout.PORTRAIT_QS_CUSTOM_TILES to PORTRAIT_QS_CUSTOM_TILE_ROWS,
             AxQsGridLayout.SPLIT_SHADE_TILES to SPLIT_SHADE_TILE_ROWS,
         )
 

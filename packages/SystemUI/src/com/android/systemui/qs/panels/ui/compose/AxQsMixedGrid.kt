@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.android.compose.animation.scene.ContentScope
@@ -103,21 +104,25 @@ internal fun ContentScope.AxQsMixedGrid(
     panelSwipeFromQs: () -> Boolean = { false },
     expansionFromLeft: () -> Boolean = { false },
     animationResetSequence: () -> Int = { 0 },
+    layoutOverride: AxQsLayout? = null,
+    centerVertically: Boolean = false,
+    endPaddingOverride: Dp? = null,
 ) {
-    val splitShade = viewModel.isInSplitShade
-    val landscapeLayout = !qqs && !splitShade && axQsViewModel.useLandscapeLayout
-    val compactStyle = axQsViewModel.useCompactStyle && !splitShade
+    val splitShade = viewModel.isInSplitShade && layoutOverride == null
+    val landscapeLayout = !qqs && !splitShade && layoutOverride == null && axQsViewModel.useLandscapeLayout
+    val compactStyle = axQsViewModel.useCompactStyle && !splitShade && layoutOverride == null
     LaunchedEffect(splitShade, landscapeLayout) {
         if (splitShade || landscapeLayout) {
             scrollState.scrollTo(0)
         }
     }
     val layout =
-        when {
-            splitShade -> AxQsLayout.SPLIT_SHADE
-            qqs -> AxQsLayout.QQS
-            else -> AxQsLayout.QS
-        }
+        layoutOverride
+            ?: when {
+                splitShade -> AxQsLayout.SPLIT_SHADE
+                qqs -> AxQsLayout.QQS
+                else -> AxQsLayout.QS
+            }
     val controlGridLayout = AxQsGridLayout.from(layout, AxQsGridSection.CONTROLS)
     val tileGridLayout = AxQsGridLayout.from(layout, AxQsGridSection.TILES)
     val controlColumns = axQsViewModel.columns(controlGridLayout)
@@ -229,7 +234,7 @@ internal fun ContentScope.AxQsMixedGrid(
                     )
                 }
             val rows =
-                if (layout == AxQsLayout.QS) {
+                if (layout == AxQsLayout.QS || layout.isSplitQsExtraPage) {
                     AxQsGridRows(
                         controls = AX_QS_CONTROL_MAX_ROWS,
                         tiles = axQsVisibleTileRows(tileItems.size, tileColumns, tileRowLimit),
@@ -457,7 +462,8 @@ internal fun ContentScope.AxQsMixedGrid(
 
     val panelView = LocalView.current
     val miuiMotion =
-        if (axQsViewModel.useMiuiQsAnimation(splitShade) &&
+        if (layoutOverride == null &&
+            axQsViewModel.useMiuiQsAnimation(splitShade) &&
             viewModel.statusBarState == StatusBarState.SHADE && !viewModel.isEditing &&
             !viewModel.isTransitioningToFullShade
         ) {
@@ -504,7 +510,8 @@ internal fun ContentScope.AxQsMixedGrid(
                 modifier = panelModifier.miuiQsMotionBounds(miuiMotion)
             ) {
                 val contentPadding = axQsViewModel.spacing.sidePadding.dp
-                val gridWidth = (maxWidth - contentPadding * 2).coerceAtLeast(0.dp)
+                val endPadding = endPaddingOverride ?: contentPadding
+                val gridWidth = (maxWidth - contentPadding - endPadding).coerceAtLeast(0.dp)
                 val circleCells =
                     useAxQsCircleCells(
                         gridWidth = gridWidth,
@@ -668,12 +675,15 @@ internal fun ContentScope.AxQsMixedGrid(
                             showWeather = showWeather,
                             compactStyle = compactStyle || headerInOverlay,
                             autoHideTilePageIndicator = axQsViewModel.autoHideTilePageIndicator,
+                            centerVertically = centerVertically,
                             rowHeight = rowHeight,
                             spacing = spacing,
                             editButtonProgress = qsEntranceProgress,
                             scrollState = scrollState,
                             circleCells = circleCells,
-                            modifier = Modifier.fillMaxSize().padding(horizontal = contentPadding),
+                            modifier =
+                                Modifier.fillMaxSize()
+                                    .padding(start = contentPadding, end = endPadding),
                             controlContent = controlContent,
                             tileContent = tileContent,
                             tileLabel = tileLabel,

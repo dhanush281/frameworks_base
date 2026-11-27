@@ -189,6 +189,7 @@ fun AxQsEditUi(
     onOpenPanelSettings: (AxQsLayout) -> Unit,
     animateItemBounds: Boolean,
     splitShade: Boolean,
+    initialLayout: AxQsLayout? = null,
     onResetTiles: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -199,15 +200,31 @@ fun AxQsEditUi(
     val showQqsEditor =
         !landscape && !splitShade && axQsViewModel.panelMode == AxQsPanelMode.TOGETHER &&
             !axQsViewModel.useSharedQsLayout
+    val showSplitPagesEditor =
+        !landscape && !splitShade && axQsViewModel.panelMode == AxQsPanelMode.SEPARATE &&
+            axQsViewModel.splitQsPages
+    var splitPageLayout by rememberSaveable(initialLayout) {
+        mutableStateOf(
+            when (initialLayout) {
+                AxQsLayout.QS_NETWORK,
+                AxQsLayout.QS_CUSTOM -> initialLayout
+                else -> AxQsLayout.QS
+            }
+        )
+    }
     var resetEpoch by remember { mutableStateOf(0) }
     var showResetDialog by remember { mutableStateOf(false) }
     val layout = when {
         splitShade -> AxQsLayout.SPLIT_SHADE
+        showSplitPagesEditor -> splitPageLayout
         editQqs && showQqsEditor -> AxQsLayout.QQS
         else -> AxQsLayout.QS
     }
 
     LaunchedEffect(showQqsEditor) { if (!showQqsEditor) editQqs = false }
+    LaunchedEffect(showSplitPagesEditor) {
+        if (!showSplitPagesEditor) splitPageLayout = AxQsLayout.QS
+    }
 
     if (showResetDialog) {
         AxAlertDialog(
@@ -354,7 +371,8 @@ fun AxQsEditUi(
                     }
                 }
             }
-            val bottomSpacing = if (showQqsEditor) 100.dp + navBarBottom else 32.dp
+            val hasFloatingBar = showQqsEditor || showSplitPagesEditor
+            val bottomSpacing = if (hasFloatingBar) 100.dp + navBarBottom else 32.dp
             Spacer(Modifier.height(bottomSpacing))
         }
 
@@ -369,8 +387,48 @@ fun AxQsEditUi(
                         .windowInsetsPadding(WindowInsets.navigationBars)
                         .padding(bottom = 16.dp),
             )
+        } else if (showSplitPagesEditor) {
+            AxQsEditSplitPagesBottomBar(
+                selectedLayout = splitPageLayout,
+                onSelectLayout = { splitPageLayout = it },
+                modifier =
+                    Modifier.align(Alignment.BottomCenter)
+                        .zIndex(100f)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .padding(bottom = 16.dp),
+            )
         }
     }
+}
+
+@Composable
+private fun AxQsEditSplitPagesBottomBar(
+    selectedLayout: AxQsLayout,
+    onSelectLayout: (AxQsLayout) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    HorizontalFloatingToolbar(
+        expanded = true,
+        modifier = modifier,
+        colors = FloatingToolbarDefaults.standardFloatingToolbarColors(),
+        content = {
+            AxQsEditFloatingTab(
+                title = stringResource(R.string.lunaris_qs_page_main),
+                selected = selectedLayout == AxQsLayout.QS,
+                onClick = { onSelectLayout(AxQsLayout.QS) },
+            )
+            AxQsEditFloatingTab(
+                title = stringResource(R.string.lunaris_qs_page_network),
+                selected = selectedLayout == AxQsLayout.QS_NETWORK,
+                onClick = { onSelectLayout(AxQsLayout.QS_NETWORK) },
+            )
+            AxQsEditFloatingTab(
+                title = stringResource(R.string.lunaris_qs_page_custom),
+                selected = selectedLayout == AxQsLayout.QS_CUSTOM,
+                onClick = { onSelectLayout(AxQsLayout.QS_CUSTOM) },
+            )
+        },
+    )
 }
 
 @Composable
@@ -940,6 +998,18 @@ private fun AxEditableGrid(
                 val item = addGridItem(addItem) ?: return@AxAvailableControls
                 selectedId = null
                 if (addItem is AxAddItem.Tile && !addItem.viewModel.isCurrent) {
+                    if (
+                        layout.isSplitQsExtraPage &&
+                            axQsViewModel.order(AxQsLayout.QS, AxQsGridSection.TILES) == null
+                    ) {
+                        val mainControls =
+                            axQsViewModel.order(AxQsLayout.QS, AxQsGridSection.CONTROLS).orEmpty()
+                        val mainTiles =
+                            currentTiles
+                                .map { it.tileSpec.spec }
+                                .filterNot(mainControls::contains)
+                        axQsViewModel.setOrder(mainTiles, AxQsLayout.QS, AxQsGridSection.TILES)
+                    }
                     editModeViewModel.addTile(addItem.viewModel.tileSpec)
                 }
                 if (item.section == AxQsGridSection.CONTROLS) {
@@ -1873,7 +1943,7 @@ private fun buildEditItems(
             )
         }
     val rows =
-        if (layout == AxQsLayout.QS) {
+        if (layout == AxQsLayout.QS || layout.isSplitQsExtraPage) {
             AX_QS_CONTROL_MAX_ROWS
         } else {
             axQsSharedGridRows(controlItems, controlColumns, tileItems.size, tileColumns).controls

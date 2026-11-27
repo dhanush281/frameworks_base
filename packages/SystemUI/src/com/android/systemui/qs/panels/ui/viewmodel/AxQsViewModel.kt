@@ -341,6 +341,18 @@ constructor(
             initialValue = repository.qsSpans.value,
             source = repository.qsSpans,
         )
+    private val qsNetworkSpans by
+        hydrator.hydratedStateOf(
+            traceName = "qsNetworkSpans",
+            initialValue = repository.qsNetworkSpans.value,
+            source = repository.qsNetworkSpans,
+        )
+    private val qsCustomSpans by
+        hydrator.hydratedStateOf(
+            traceName = "qsCustomSpans",
+            initialValue = repository.qsCustomSpans.value,
+            source = repository.qsCustomSpans,
+        )
     private val tileFolders by
         hydrator.hydratedStateOf(
             traceName = "tileFolders",
@@ -389,6 +401,30 @@ constructor(
             initialValue = repository.qsTileOrder.value ?: defaultTileIds,
             source = repository.qsTileOrder,
         )
+    private val qsNetworkControlOrder by
+        hydrator.hydratedStateOf(
+            traceName = "qsNetworkControlOrder",
+            initialValue = repository.qsNetworkControlOrder.value,
+            source = repository.qsNetworkControlOrder,
+        )
+    private val qsNetworkTileOrder by
+        hydrator.hydratedStateOf(
+            traceName = "qsNetworkTileOrder",
+            initialValue = repository.qsNetworkTileOrder.value,
+            source = repository.qsNetworkTileOrder,
+        )
+    private val qsCustomControlOrder by
+        hydrator.hydratedStateOf(
+            traceName = "qsCustomControlOrder",
+            initialValue = repository.qsCustomControlOrder.value,
+            source = repository.qsCustomControlOrder,
+        )
+    private val qsCustomTileOrder by
+        hydrator.hydratedStateOf(
+            traceName = "qsCustomTileOrder",
+            initialValue = repository.qsCustomTileOrder.value,
+            source = repository.qsCustomTileOrder,
+        )
     private val landscapeControlOrder by
         hydrator.hydratedStateOf(
             traceName = "landscapeControlOrder",
@@ -424,6 +460,18 @@ constructor(
             traceName = "qsControlPositions",
             initialValue = emptyMap(),
             source = repository.qsControlPositions,
+        )
+    private val qsNetworkControlPositions by
+        hydrator.hydratedStateOf(
+            traceName = "qsNetworkControlPositions",
+            initialValue = emptyMap(),
+            source = repository.qsNetworkControlPositions,
+        )
+    private val qsCustomControlPositions by
+        hydrator.hydratedStateOf(
+            traceName = "qsCustomControlPositions",
+            initialValue = emptyMap(),
+            source = repository.qsCustomControlPositions,
         )
     private val landscapeControlPositions by
         hydrator.hydratedStateOf(
@@ -499,6 +547,15 @@ constructor(
         )
 
     fun setTwoRowHeader(enabled: Boolean) = repository.setTwoRowHeader(enabled)
+
+    val splitQsPages by
+        hydrator.hydratedStateOf(
+            traceName = "splitQsPages",
+            initialValue = repository.splitQsPages.value,
+            source = repository.splitQsPages,
+        )
+
+    fun setSplitQsPages(enabled: Boolean) = repository.setSplitQsPages(enabled)
 
     val miuiSplitQsAnimation by
         hydrator.hydratedStateOf(
@@ -714,6 +771,21 @@ constructor(
         val available = availableIds.toSet()
         val saved = configuredSectionOrder(layout, section)?.filter(available::contains)
         if (saved != null) return saved
+        if (layout == AxQsLayout.QS_NETWORK) {
+            return if (section == AxQsGridSection.CONTROLS) {
+                defaultNetworkPageIds(available)
+            } else {
+                emptyList()
+            }
+        }
+        if (layout == AxQsLayout.QS_CUSTOM) {
+            val customControls = defaultCustomPageControlIds(available)
+            return if (section == AxQsGridSection.CONTROLS) {
+                customControls
+            } else {
+                defaultCustomPageTileIds(available, customControls)
+            }
+        }
         val legacy = configuredOrder(layout)?.filter { id ->
             id in available && sectionForLegacyId(id, layout) == section
         }
@@ -744,6 +816,8 @@ constructor(
         return when (layout) {
             AxQsLayout.QQS -> qqsOrder
             AxQsLayout.QS -> qsOrder
+            AxQsLayout.QS_NETWORK,
+            AxQsLayout.QS_CUSTOM -> null
             AxQsLayout.SPLIT_SHADE -> landscapeOrder
         }?.takeIf { it.isNotEmpty() }
     }
@@ -757,6 +831,10 @@ constructor(
                 if (section == AxQsGridSection.CONTROLS) qqsControlOrder else qqsTileOrder
             AxQsLayout.QS ->
                 if (section == AxQsGridSection.CONTROLS) qsControlOrder else qsTileOrder
+            AxQsLayout.QS_NETWORK ->
+                if (section == AxQsGridSection.CONTROLS) qsNetworkControlOrder else qsNetworkTileOrder
+            AxQsLayout.QS_CUSTOM ->
+                if (section == AxQsGridSection.CONTROLS) qsCustomControlOrder else qsCustomTileOrder
             AxQsLayout.SPLIT_SHADE ->
                 if (section == AxQsGridSection.CONTROLS) {
                     splitShadeControlOrder ?: landscapeControlOrder
@@ -770,20 +848,29 @@ constructor(
         return when (layout) {
             AxQsLayout.QQS -> qqsSpans
             AxQsLayout.QS -> qsSpans
+            AxQsLayout.QS_NETWORK -> qsNetworkSpans
+            AxQsLayout.QS_CUSTOM -> qsCustomSpans
             AxQsLayout.SPLIT_SHADE -> landscapeSpans + splitShadeSpans
         }
     }
 
     fun span(id: String, layout: AxQsLayout, default: AxQsSpan): AxQsSpan {
-        val resolvedDefault =
-            if (
-                default == AxQsSpan.TileDefault &&
-                    (id in DEFAULT_NETWORK_IDS || id == BLUETOOTH_TILE_ID)
-            ) {
-                AxQsSpan.TileWideDefault
-            } else {
-                default
+        val pageDefault =
+            when (layout) {
+                AxQsLayout.QS_NETWORK -> DEFAULT_NETWORK_PAGE_SPANS[id]
+                AxQsLayout.QS_CUSTOM -> DEFAULT_CUSTOM_PAGE_SPANS[id]
+                else -> null
             }
+        val resolvedDefault =
+            pageDefault
+                ?: if (
+                    default == AxQsSpan.TileDefault &&
+                        (id in DEFAULT_NETWORK_IDS || id == BLUETOOTH_TILE_ID)
+                ) {
+                    AxQsSpan.TileWideDefault
+                } else {
+                    default
+                }
         return if (
             configuredSectionOrder(layout, AxQsGridSection.CONTROLS) == null &&
                 configuredOrder(layout) == null
@@ -853,6 +940,8 @@ constructor(
         return when (layout) {
             AxQsLayout.QQS -> qqsControlPositions
             AxQsLayout.QS -> qsControlPositions
+            AxQsLayout.QS_NETWORK -> qsNetworkControlPositions
+            AxQsLayout.QS_CUSTOM -> qsCustomControlPositions
             AxQsLayout.SPLIT_SHADE ->
                 if (hasSplitShadeOrder()) {
                     splitShadeControlPositions
@@ -1042,6 +1131,45 @@ constructor(
             .distinct()
     }
 
+    private fun defaultNetworkPageIds(available: Set<String>): List<String> {
+        val hasSplitInternet = "wifi" in available && "cell" in available
+        return buildList {
+            if ("airplane" in available) add("airplane")
+            if (hasSplitInternet) {
+                add("wifi")
+                add("cell")
+            } else {
+                DEFAULT_NETWORK_IDS.firstOrNull(available::contains)?.let(::add)
+                if ("cell" in available) add("cell")
+            }
+            NETWORK_PAGE_EXTRA_IDS.forEach { id ->
+                if (id in available && id !in this) add(id)
+            }
+        }
+    }
+
+    private fun defaultCustomPageControlIds(available: Set<String>): List<String> {
+        val network = DEFAULT_NETWORK_IDS.firstOrNull(available::contains)
+        return listOfNotNull(
+                AxQsControl.RINGER.id,
+                BLUETOOTH_TILE_ID,
+                network,
+                "airplane",
+                "flashlight",
+                AxQsControl.MEDIA.id,
+            )
+            .filter(available::contains)
+            .distinct()
+    }
+
+    private fun defaultCustomPageTileIds(
+        available: Set<String>,
+        controls: List<String>,
+    ): List<String> {
+        val controlSet = controls.toSet()
+        return CUSTOM_PAGE_DEFAULT_TILE_IDS.filter { it in available && it !in controlSet }.take(4)
+    }
+
     private fun sectionForLegacyId(id: String, layout: AxQsLayout): AxQsGridSection {
         AxQsControl.entries.firstOrNull { it.id == id }?.let { control ->
             return if (control.canUseTileGrid) {
@@ -1082,6 +1210,49 @@ constructor(
         const val DEFAULT_QQS_TILE_ROWS = 2
         const val DEFAULT_TILE_GRID_ROWS = 3
         val DEFAULT_NETWORK_IDS = listOf("wifi", "internet")
+        val NETWORK_PAGE_EXTRA_IDS =
+            listOf(
+                BLUETOOTH_TILE_ID,
+                "hotspot",
+                "nfc",
+                "vpn",
+                "dataswitch",
+                "usb_tether",
+                "vpn_tethering",
+                "dns",
+                "preferred_network",
+                "cast",
+            )
+        val DEFAULT_NETWORK_PAGE_SPANS =
+            mapOf(
+                "airplane" to AxQsSpan(4, 1),
+                "wifi" to AxQsSpan(2, 2),
+                "cell" to AxQsSpan(2, 2),
+                "internet" to AxQsSpan(2, 2),
+                BLUETOOTH_TILE_ID to AxQsSpan(2, 2),
+                "hotspot" to AxQsSpan(2, 2),
+                "nfc" to AxQsSpan(4, 1),
+                "vpn" to AxQsSpan(4, 1),
+                "cast" to AxQsSpan(4, 1),
+                "dataswitch" to AxQsSpan(2, 1),
+                "usb_tether" to AxQsSpan(2, 1),
+                "vpn_tethering" to AxQsSpan(2, 1),
+                "dns" to AxQsSpan(2, 1),
+                "preferred_network" to AxQsSpan(2, 1),
+            )
+        val DEFAULT_CUSTOM_PAGE_SPANS =
+            mapOf(
+                AxQsControl.RINGER.id to AxQsSpan(2, 1),
+                BLUETOOTH_TILE_ID to AxQsSpan(2, 1),
+                "wifi" to AxQsSpan(2, 1),
+                "cell" to AxQsSpan(2, 1),
+                "internet" to AxQsSpan(2, 1),
+                "airplane" to AxQsSpan(2, 1),
+                "flashlight" to AxQsSpan(2, 1),
+                AxQsControl.MEDIA.id to AxQsSpan(2, 2),
+            )
+        val CUSTOM_PAGE_DEFAULT_TILE_IDS =
+            listOf("hotspot", "dark", "rotation", "dnd", "battery", "location", "alarm")
         val DEFAULT_CONTROL_IDS =
             setOf(
                 BLUETOOTH_TILE_ID,

@@ -351,6 +351,10 @@ enum class AxQsGridLayout(
     PORTRAIT_QQS_TILES(AxQsLayout.QQS, AxQsGridSection.TILES),
     PORTRAIT_QS_CONTROLS(AxQsLayout.QS, AxQsGridSection.CONTROLS),
     PORTRAIT_QS_TILES(AxQsLayout.QS, AxQsGridSection.TILES),
+    PORTRAIT_QS_NETWORK_CONTROLS(AxQsLayout.QS_NETWORK, AxQsGridSection.CONTROLS),
+    PORTRAIT_QS_NETWORK_TILES(AxQsLayout.QS_NETWORK, AxQsGridSection.TILES),
+    PORTRAIT_QS_CUSTOM_CONTROLS(AxQsLayout.QS_CUSTOM, AxQsGridSection.CONTROLS),
+    PORTRAIT_QS_CUSTOM_TILES(AxQsLayout.QS_CUSTOM, AxQsGridSection.TILES),
     SPLIT_SHADE_CONTROLS(AxQsLayout.SPLIT_SHADE, AxQsGridSection.CONTROLS),
     SPLIT_SHADE_TILES(AxQsLayout.SPLIT_SHADE, AxQsGridSection.TILES);
 
@@ -379,7 +383,12 @@ enum class AxQsGridLayout(
 enum class AxQsLayout {
     QQS,
     QS,
-    SPLIT_SHADE,
+    QS_NETWORK,
+    QS_CUSTOM,
+    SPLIT_SHADE;
+
+    val isSplitQsExtraPage: Boolean
+        get() = this == QS_NETWORK || this == QS_CUSTOM
 }
 
 enum class AxQsPanelMode(val settingValue: Int) {

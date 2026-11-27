@@ -58,6 +58,8 @@ data class LunarisQsWidgetKey(val layout: AxQsLayout, val control: AxQsControl) 
                 when (layout) {
                     AxQsLayout.QQS -> "lunaris_qqs_app_widget"
                     AxQsLayout.QS -> "lunaris_qs_app_widget"
+                    AxQsLayout.QS_NETWORK -> "lunaris_qs_network_app_widget"
+                    AxQsLayout.QS_CUSTOM -> "lunaris_qs_custom_app_widget"
                     AxQsLayout.SPLIT_SHADE -> "lunaris_qs_split_shade_app_widget"
                 }
             return if (slot == 0) base else "${base}_${slot + 1}"
@@ -70,6 +72,8 @@ data class LunarisQsWidgetKey(val layout: AxQsLayout, val control: AxQsControl) 
                     AxQsLayout.QQS -> 0x4c515301
                     AxQsLayout.QS -> 0x4c515302
                     AxQsLayout.SPLIT_SHADE -> 0x4c515303
+                    AxQsLayout.QS_NETWORK -> 0x4c515304
+                    AxQsLayout.QS_CUSTOM -> 0x4c515305
                 }
             return base + slot * 0x10
         }

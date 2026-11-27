@@ -18,5 +18,7 @@ internal fun shouldPlayQsContent(
         when (layout) {
             AxQsLayout.QQS -> qsExpansion <= 0f && !qsExpanded
             AxQsLayout.QS,
+            AxQsLayout.QS_NETWORK,
+            AxQsLayout.QS_CUSTOM,
             AxQsLayout.SPLIT_SHADE -> qsExpansion >= 1f && qsExpanded
         }

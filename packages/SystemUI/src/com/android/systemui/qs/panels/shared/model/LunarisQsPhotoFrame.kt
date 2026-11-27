@@ -44,7 +44,8 @@ data class LunarisQsPhotoFrame(
             .toString()
 
     companion object {
-        private val filePattern = Regex("(?:qqs|qs|split_shade)_[a-f0-9-]{36}\\.(?:webp|anim)")
+        private val filePattern =
+            Regex("(?:qqs|qs|qs_network|qs_custom|split_shade)_[a-f0-9-]{36}\\.(?:webp|anim)")
 
         fun isValidFileName(value: String): Boolean = filePattern.matches(value)
 
@@ -52,6 +53,8 @@ data class LunarisQsPhotoFrame(
             when (layout) {
                 AxQsLayout.QQS -> "lunaris_qqs_photo_frame"
                 AxQsLayout.QS -> "lunaris_qs_photo_frame"
+                AxQsLayout.QS_NETWORK -> "lunaris_qs_network_photo_frame"
+                AxQsLayout.QS_CUSTOM -> "lunaris_qs_custom_photo_frame"
                 AxQsLayout.SPLIT_SHADE -> "lunaris_qs_split_shade_photo_frame"
             }
 

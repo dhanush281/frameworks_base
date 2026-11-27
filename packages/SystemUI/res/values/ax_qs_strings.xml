@@ -150,4 +150,13 @@
     <string name="ax_qs_settings_step_based_volume_summary">Turn off to slide smoothly between volume levels</string>
     <string name="lunaris_qs_two_row_header">Two-row header</string>
     <string name="lunaris_qs_two_row_header_summary">Show shortcuts above carrier info in Quick Settings and a large clock above it in notifications.</string>
+    <string name="lunaris_qs_split_pages">Quick Settings pages</string>
+    <string name="lunaris_qs_split_pages_summary">Swipe vertically or use the side icons in Split Quick Settings to switch between Main, Media, Network, and Custom pages.</string>
+    <string name="lunaris_qs_page_main">Main</string>
+    <string name="lunaris_qs_page_media">Media</string>
+    <string name="lunaris_qs_page_network">Network</string>
+    <string name="lunaris_qs_page_custom">Custom</string>
+    <string name="ax_qs_settings_layout_network">Network page</string>
+    <string name="ax_qs_settings_layout_custom">Custom page</string>
+    <string name="lunaris_qs_media_not_playing">Not playing</string>
 </resources>

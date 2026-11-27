@@ -50,6 +50,7 @@ import androidx.lifecycle.MutableLiveData
 import com.android.packageinstaller.common.EventResultPersister
 import com.android.packageinstaller.common.EventResultPersister.OutOfIdsException
 import com.android.packageinstaller.common.InstallEventReceiver
+import com.android.packageinstaller.common.PackageBundleHelper
 import com.android.packageinstaller.v2.model.InstallAborted.Companion.ABORT_REASON_DONE
 import com.android.packageinstaller.v2.model.InstallAborted.Companion.ABORT_REASON_INTERNAL_ERROR
 import com.android.packageinstaller.v2.model.InstallAborted.Companion.ABORT_REASON_POLICY
@@ -70,11 +71,14 @@ import com.android.packageinstaller.v2.model.PackageUtil.isPermissionGranted
 import com.android.packageinstaller.v2.model.PackageUtil.localLogv
 import java.io.File
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @SuppressLint("MissingPermission")
 class InstallRepository(private val context: Context) : EventResultPersister.EventResultObserver {
@@ -133,6 +137,8 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
     private lateinit var appOpRequestInfo: AppOpRequestInfo
     private lateinit var appSnippet: PackageUtil.AppSnippet
     private lateinit var stagingJob: Job
+    private var obbExtractJob: Job? = null
+    private var extractedObbFiles: List<File> = emptyList()
 
     /**
      * PackageInfo of the app being installed on device.
@@ -409,11 +415,15 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
                 }
             }
 
-            sessionStager = SessionStager(context, uri, stagedSessionId)
+            sessionStager = SessionStager(context, uri, intent.type, stagedSessionId)
             stagingJob = GlobalScope.launch(Dispatchers.Main) {
-                val wasFileStaged = sessionStager!!.execute()
+                val stageResult = sessionStager!!.execute()
 
-                if (wasFileStaged) {
+                if (stageResult.success) {
+                    if (stageResult.hasObb) {
+                        intent.putExtra(EXTRA_HAS_OBB, true)
+                        intent.putExtra(EXTRA_OBB_SIZE_BYTES, stageResult.obbSizeBytes)
+                    }
                     _stagingResult.value = InstallReady()
                 } else {
                     cleanupStagingSession()
@@ -423,7 +433,8 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
                         resultIntent = Intent().putExtra(
                             Intent.EXTRA_INSTALL_RESULT, PackageManager.INSTALL_FAILED_INVALID_APK
                         ),
-                        activityResultCode = Activity.RESULT_FIRST_USER
+                        activityResultCode = Activity.RESULT_FIRST_USER,
+                        errorDialogType = DLG_PACKAGE_ERROR
                     )
                 }
             }
@@ -477,19 +488,23 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
             Manifest.permission.USE_FULL_SCREEN_INTENT, SessionParams.PERMISSION_STATE_DENIED
         )
         if (pfd != null) {
-            try {
-                val installInfo = packageInstaller.readInstallInfo(pfd, debugPathName, 0)
-                params.setAppPackageName(installInfo.packageName)
-                params.setInstallLocation(installInfo.installLocation)
-                params.setSize(installInfo.calculateInstalledSize(params, pfd))
-            } catch (e: PackageInstaller.PackageParsingException) {
-                Log.e(LOG_TAG, "Cannot parse package $debugPathName. Assuming defaults.", e)
+            if (PackageBundleHelper.isBundleMimeType(intent.type)) {
                 params.setSize(pfd.statSize)
-            } catch (e: IOException) {
-                Log.e(
-                    LOG_TAG, "Cannot calculate installed size $debugPathName. " +
-                        "Try only apk size.", e
-                )
+            } else {
+                try {
+                    val installInfo = packageInstaller.readInstallInfo(pfd, debugPathName, 0)
+                    params.setAppPackageName(installInfo.packageName)
+                    params.setInstallLocation(installInfo.installLocation)
+                    params.setSize(installInfo.calculateInstalledSize(params, pfd))
+                } catch (e: PackageInstaller.PackageParsingException) {
+                    Log.e(LOG_TAG, "Cannot parse package $debugPathName. Assuming defaults.", e)
+                    params.setSize(pfd.statSize)
+                } catch (e: IOException) {
+                    Log.e(
+                        LOG_TAG, "Cannot calculate installed size $debugPathName. " +
+                            "Try only apk size.", e
+                    )
+                }
             }
         } else {
             Log.e(LOG_TAG, "Cannot parse package $debugPathName. Assuming defaults.")
@@ -733,10 +748,12 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
                 return InstallAborted(ABORT_REASON_INTERNAL_ERROR)
             }
         }
+        val obbSizeBytes = intent.getLongExtra(EXTRA_OBB_SIZE_BYTES, 0L)
         appDetails = newPackageInfo?.let {
             InstallAppDetails.fromPackageInfo(
                 it,
                 packageUri.path?.takeIf { scheme == ContentResolver.SCHEME_FILE }?.let(::File),
+                obbSizeBytes,
             )
         }
         isAppUpdating = isAppUpdating(newPackageInfo)
@@ -1119,9 +1136,53 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
             context, installId, broadcastIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
+        val hasObb = intent.getBooleanExtra(EXTRA_HAS_OBB, false)
+        val targetPackageName = newPackageInfo?.packageName
+        if (hasObb && uri != null && ContentResolver.SCHEME_CONTENT == uri.scheme
+            && !targetPackageName.isNullOrEmpty()
+        ) {
+            @OptIn(DelicateCoroutinesApi::class)
+            obbExtractJob = GlobalScope.launch(Dispatchers.IO) {
+                try {
+                    val created = PackageBundleHelper.extractObbFiles(
+                        context, uri, targetPackageName, PackageBundleHelper.CancelCheck { isActive }
+                    )
+                    if (!isActive) {
+                        PackageBundleHelper.cleanupObbFiles(created)
+                        return@launch
+                    }
+                    extractedObbFiles = created
+                    packageInstaller.openSession(stagedSessionId).use { session ->
+                        session.commit(pendingIntent.intentSender)
+                    }
+                } catch (e: CancellationException) {
+                    PackageBundleHelper.cleanupObbFiles(extractedObbFiles)
+                    extractedObbFiles = emptyList()
+                    InstallEventReceiver.removeObserver(context, installId)
+                    throw e
+                } catch (e: Exception) {
+                    Log.e(LOG_TAG, "Failed to extract OBB or commit session $stagedSessionId.", e)
+                    PackageBundleHelper.cleanupObbFiles(extractedObbFiles)
+                    extractedObbFiles = emptyList()
+                    InstallEventReceiver.removeObserver(context, installId)
+                    cleanupStagingSession()
+                    if (isActive) {
+                        withContext(Dispatchers.Main) {
+                            setStageBasedOnResult(
+                                PackageInstaller.STATUS_FAILURE,
+                                PackageManager.INSTALL_FAILED_INTERNAL_ERROR,
+                                e.message
+                            )
+                        }
+                    }
+                }
+            }
+            return
+        }
         try {
-            val session = packageInstaller.openSession(stagedSessionId)
-            session.commit(pendingIntent.intentSender)
+            packageInstaller.openSession(stagedSessionId).use { session ->
+                session.commit(pendingIntent.intentSender)
+            }
         } catch (e: Exception) {
             Log.e(LOG_TAG, "Session $stagedSessionId could not be opened.", e)
             packageInstaller.abandonSession(stagedSessionId)
@@ -1146,6 +1207,7 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
         val shouldReturnResult = intent.getBooleanExtra(Intent.EXTRA_RETURN_RESULT, false)
 
         if (statusCode == PackageInstaller.STATUS_SUCCESS) {
+            extractedObbFiles = emptyList()
             val resultIntent = if (shouldReturnResult) {
                 Intent().putExtra(Intent.EXTRA_INSTALL_RESULT, PackageManager.INSTALL_SUCCEEDED)
             } else {
@@ -1159,6 +1221,10 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
                 resultIntent
             )
         } else {
+            if (extractedObbFiles.isNotEmpty()) {
+                PackageBundleHelper.cleanupObbFiles(extractedObbFiles)
+                extractedObbFiles = emptyList()
+            }
             // TODO (b/346655018): Use INSTALL_FAILED_ABORTED legacyCode in the condition
             // statusCode can be STATUS_FAILURE_ABORTED if:
             // 1. GPP blocks an install.
@@ -1199,6 +1265,12 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
      * be aborted
      */
     fun cleanupInstall() {
+        obbExtractJob?.cancel()
+        obbExtractJob = null
+        if (extractedObbFiles.isNotEmpty()) {
+            PackageBundleHelper.cleanupObbFiles(extractedObbFiles)
+            extractedObbFiles = emptyList()
+        }
         if (sessionId > 0) {
             packageInstaller.setPermissionsResult(sessionId, false)
         } else if (stagedSessionId > 0) {
@@ -1254,6 +1326,8 @@ class InstallRepository(private val context: Context) : EventResultPersister.Eve
 
     companion object {
         const val EXTRA_STAGED_SESSION_ID = "com.android.packageinstaller.extra.STAGED_SESSION_ID"
+        const val EXTRA_HAS_OBB = "com.android.packageinstaller.extra.HAS_OBB"
+        const val EXTRA_OBB_SIZE_BYTES = "com.android.packageinstaller.extra.OBB_SIZE_BYTES"
         const val SCHEME_PACKAGE = "package"
         const val BROADCAST_ACTION = "com.android.packageinstaller.ACTION_INSTALL_COMMIT"
         private val LOG_TAG = InstallRepository::class.java.simpleName

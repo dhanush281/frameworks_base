@@ -87,25 +87,27 @@ public class PackageUtil {
      */
     @Nullable
     public static PackageInfo getPackageInfo(Context context, File sourceFile, int flags) {
-        String filePath = sourceFile.getAbsolutePath();
-        if (filePath.endsWith(SPLIT_BASE_APK_SUFFIX)) {
-            File dir = sourceFile.getParentFile();
+        File dir = sourceFile.getParentFile();
+        if (dir != null) {
             try (Stream<Path> list = Files.list(dir.toPath())) {
                 long count = list
-                        .filter((name) -> name.endsWith(SPLIT_APK_SUFFIX))
+                        .filter((name) -> name.getFileName() != null
+                                && name.getFileName().toString().endsWith(SPLIT_APK_SUFFIX))
                         .limit(2)
                         .count();
                 if (count > 1) {
-                    // split apks, use file directory to get archive info
-                    filePath = dir.getPath();
+                    PackageInfo clusterInfo = context.getPackageManager()
+                            .getPackageArchiveInfo(dir.getPath(), flags);
+                    if (clusterInfo != null) {
+                        return clusterInfo;
+                    }
                 }
             } catch (Exception ignored) {
-                // No access to the parent directory, proceed to read app snippet
-                // from the base apk only
             }
         }
         try {
-            return context.getPackageManager().getPackageArchiveInfo(filePath, flags);
+            return context.getPackageManager()
+                    .getPackageArchiveInfo(sourceFile.getAbsolutePath(), flags);
         } catch (Exception ignored) {
             return null;
         }
@@ -255,11 +257,14 @@ public class PackageUtil {
      */
     public static AppSnippet getAppSnippet(
             Activity pContext, ApplicationInfo appInfo, File sourceFile) {
-        final String archiveFilePath = sourceFile.getAbsolutePath();
+        final String archiveFilePath = appInfo.sourceDir != null
+                ? appInfo.sourceDir : sourceFile.getAbsolutePath();
         PackageManager pm = pContext.getPackageManager();
         appInfo.publicSourceDir = archiveFilePath;
 
-        if (appInfo.splitNames != null && appInfo.splitSourceDirs == null) {
+        if (appInfo.splitSourceDirs != null && appInfo.splitPublicSourceDirs == null) {
+            appInfo.splitPublicSourceDirs = appInfo.splitSourceDirs;
+        } else if (appInfo.splitNames != null && appInfo.splitSourceDirs == null) {
             final File[] files = sourceFile.getParentFile().listFiles(
                     (dir, name) -> name.endsWith(SPLIT_APK_SUFFIX));
             final String[] splits = Arrays.stream(appInfo.splitNames)

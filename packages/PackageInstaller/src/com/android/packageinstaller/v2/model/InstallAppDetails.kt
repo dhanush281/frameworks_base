@@ -11,18 +11,23 @@ data class InstallAppDetails(
     val installedVersion: String? = null,
 ) {
     companion object {
-        fun fromPackageInfo(info: PackageInfo, baseApk: File? = null): InstallAppDetails {
+        fun fromPackageInfo(
+            info: PackageInfo,
+            baseApk: File? = null,
+            extraSizeBytes: Long = 0L,
+        ): InstallAppDetails {
             val app = info.applicationInfo
             val paths = buildList<String> {
-                (baseApk?.path ?: app?.sourceDir ?: app?.publicSourceDir)?.let(::add)
+                (app?.sourceDir ?: baseApk?.path ?: app?.publicSourceDir)?.let(::add)
                 app?.splitSourceDirs?.let(::addAll)
             }.distinct()
-            val sizeBytes = try {
+            val apkSizeBytes = try {
                 paths.map { File(it).takeIf(File::isFile)?.length() ?: 0L }
                     .takeIf { it.isNotEmpty() && it.all { size -> size > 0 } }?.sum()
             } catch (_: SecurityException) {
                 null
             }
+            val sizeBytes = apkSizeBytes?.let { it + extraSizeBytes.coerceAtLeast(0L) }
             return InstallAppDetails(
                 packageName = info.packageName,
                 sizeBytes = sizeBytes,

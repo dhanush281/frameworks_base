@@ -40,9 +40,11 @@ import androidx.annotation.Nullable;
 
 import com.android.packageinstaller.common.EventResultPersister;
 import com.android.packageinstaller.common.InstallEventReceiver;
+import com.android.packageinstaller.common.PackageBundleHelper;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Send package to the package manager and handle results from package manager. Once the
@@ -75,6 +77,8 @@ public class InstallInstalling extends Activity {
     private Button mCancelButton;
 
     private AlertDialog mDialog;
+    private ApplicationInfo mAppInfo;
+    private List<File> mExtractedObbFiles;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -82,6 +86,7 @@ public class InstallInstalling extends Activity {
 
         ApplicationInfo appInfo = getIntent()
                 .getParcelableExtra(PackageUtil.INTENT_ATTR_APPLICATION_INFO);
+        mAppInfo = appInfo;
         mPackageURI = getIntent().getData();
 
         if (PackageInstallerActivity.SCHEME_PACKAGE.equals(mPackageURI.getScheme())) {
@@ -117,6 +122,8 @@ public class InstallInstalling extends Activity {
                             getPackageManager().getPackageInstaller().abandonSession(mSessionId);
                             mSessionId = 0;
                         }
+                        PackageBundleHelper.cleanupObbFiles(mExtractedObbFiles);
+                        mExtractedObbFiles = null;
 
                         setResult(RESULT_CANCELED);
                         finish();
@@ -185,6 +192,8 @@ public class InstallInstalling extends Activity {
      * @param statusMessage The status description.
      */
     private void launchFailure(int statusCode, int legacyStatus, String statusMessage) {
+        PackageBundleHelper.cleanupObbFiles(mExtractedObbFiles);
+        mExtractedObbFiles = null;
         Intent failureIntent = new Intent(getIntent());
         failureIntent.setClass(this, InstallFailed.class);
         failureIntent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT);
@@ -289,8 +298,18 @@ public class InstallInstalling extends Activity {
         @Override
         protected PackageInstaller.Session doInBackground(Void... params) {
             try {
+                Uri bundleUri = getIntent().getParcelableExtra(
+                        PackageBundleHelper.EXTRA_BUNDLE_URI, Uri.class);
+                if (bundleUri != null && mAppInfo != null && mAppInfo.packageName != null) {
+                    mExtractedObbFiles = PackageBundleHelper.extractObbFiles(
+                            InstallInstalling.this,
+                            bundleUri,
+                            mAppInfo.packageName,
+                            () -> !isCancelled());
+                }
                 return getPackageManager().getPackageInstaller().openSession(mSessionId);
-            } catch (IOException e) {
+            } catch (IOException | SecurityException e) {
+                Log.w(LOG_TAG, "Failed to prepare install session", e);
                 return null;
             } finally {
                 synchronized (this) {

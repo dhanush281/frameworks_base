@@ -38,4 +38,7 @@
 ###############################################################################
 #
 # Add your custom mappings below this line (with no "#" at the start of the line):
+application/vnd.android.xapk xapk
+application/vnd.android.apkm apkm
+application/vnd.android.apks apks
 

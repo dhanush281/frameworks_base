@@ -18,18 +18,18 @@ package com.android.packageinstaller.v2.model
 
 import android.content.Context
 import android.content.pm.PackageInstaller
-import android.content.res.AssetFileDescriptor
 import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import java.io.IOException
+import com.android.packageinstaller.common.PackageBundleHelper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class SessionStager internal constructor(
     private val context: Context,
     private val uri: Uri,
+    private val mimeType: String?,
     private val stagedSessionId: Int
 ) {
 
@@ -41,51 +41,36 @@ class SessionStager internal constructor(
     val progress: LiveData<Int>
         get() = _progress
 
+    @Volatile
     var isRunning = false
 
-    suspend fun execute(): Boolean = withContext(Dispatchers.IO) {
+    suspend fun execute(): PackageBundleHelper.BundleStageResult = withContext(Dispatchers.IO) {
         isRunning = true
         val pi: PackageInstaller = context.packageManager.packageInstaller
         var sessionInfo: PackageInstaller.SessionInfo?
+        var stageResult = PackageBundleHelper.BundleStageResult(
+            success = false,
+            isBundle = false,
+            hasObb = false,
+            obbSizeBytes = 0L,
+        )
         try {
-            val session = pi.openSession(stagedSessionId)
-            context.contentResolver.openInputStream(uri).use { instream ->
-                session.setStagingProgress(0f)
-
-                if (instream == null) {
-                    return@withContext false
+            pi.openSession(stagedSessionId).use { session ->
+                stageResult = PackageBundleHelper.stageUriIntoSession(
+                    context = context,
+                    uri = uri,
+                    mimeType = mimeType,
+                    session = session,
+                    cancelCheck = { isRunning },
+                    progressCallback = { value -> _progress.postValue(value) },
+                )
+                sessionInfo = if (stageResult.success) {
+                    pi.getSessionInfo(stagedSessionId)
+                } else {
+                    null
                 }
-
-                val sizeBytes = getContentSizeBytes()
-                publishProgress(if (sizeBytes > 0) 0 else -1)
-
-                var totalRead: Long = 0
-                session.openWrite("PackageInstaller", 0, sizeBytes).use { out ->
-                    val buffer = ByteArray(1024 * 1024)
-                    while (true) {
-                        if (!isRunning) {
-                            break
-                        }
-                        val numRead = instream.read(buffer)
-                        if (numRead == -1) {
-                            session.fsync(out)
-                            break
-                        }
-                        out.write(buffer, 0, numRead)
-                        if (sizeBytes > 0) {
-                            totalRead += numRead.toLong()
-                            val fraction = totalRead.toFloat() / sizeBytes.toFloat()
-                            session.setStagingProgress(fraction)
-                            publishProgress((fraction * 100.0).toInt())
-                        }
-                    }
-                }
-                sessionInfo = pi.getSessionInfo(stagedSessionId)
             }
         } catch (e: Exception) {
-            // Note that when the above while loop is ended prematurely, it may also lead to an
-            // IOException with a message: write failed: EPIPE (Broken pipe). However, this is
-            // expected
             Log.w(LOG_TAG, "Error staging apk from content URI", e)
             sessionInfo = null
         }
@@ -95,28 +80,13 @@ class SessionStager internal constructor(
             || sessionInfo?.resolvedBaseApkPath == null
         ) {
             Log.w(LOG_TAG, "Session info is invalid: $sessionInfo")
-            false
+            stageResult.copy(success = false)
         } else {
-            true
+            stageResult
         }
     }
 
     fun cancel() {
         isRunning = false
-    }
-
-    private fun getContentSizeBytes(): Long {
-        return try {
-            context.contentResolver
-                .openAssetFileDescriptor(uri, "r")
-                .use { afd -> afd?.length ?: AssetFileDescriptor.UNKNOWN_LENGTH }
-        } catch (e: IOException) {
-            Log.w(LOG_TAG, "Failed to open asset file descriptor", e)
-            AssetFileDescriptor.UNKNOWN_LENGTH
-        }
-    }
-
-    private suspend fun publishProgress(progressValue: Int) = withContext(Dispatchers.Main) {
-        _progress.value = progressValue
     }
 }

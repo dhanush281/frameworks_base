@@ -24,6 +24,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.DialogFragment;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -43,10 +44,10 @@ import android.widget.ProgressBar;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.android.packageinstaller.common.PackageBundleHelper;
+
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 
 /**
  * If a package gets installed from a content URI this step stages the installation session
@@ -203,18 +204,23 @@ public class InstallStaging extends Activity {
                 PackageInstaller.SessionParams.PERMISSION_STATE_DENIED);
 
         if (pfd != null) {
-            try {
-                final PackageInstaller.InstallInfo result = installer.readInstallInfo(pfd,
-                        debugPathName, 0);
-                params.setAppPackageName(result.getPackageName());
-                params.setInstallLocation(result.getInstallLocation());
-                params.setSize(result.calculateInstalledSize(params, pfd));
-            } catch (PackageInstaller.PackageParsingException | IOException e) {
-                Log.e(LOG_TAG, "Cannot parse package " + debugPathName + ". Assuming defaults.", e);
-                Log.e(LOG_TAG,
-                        "Cannot calculate installed size " + debugPathName
-                                + ". Try only apk size.");
+            if (PackageBundleHelper.isBundleMimeType(intent.getType())) {
                 params.setSize(pfd.getStatSize());
+            } else {
+                try {
+                    final PackageInstaller.InstallInfo result = installer.readInstallInfo(pfd,
+                            debugPathName, 0);
+                    params.setAppPackageName(result.getPackageName());
+                    params.setInstallLocation(result.getInstallLocation());
+                    params.setSize(result.calculateInstalledSize(params, pfd));
+                } catch (PackageInstaller.PackageParsingException | IOException e) {
+                    Log.e(LOG_TAG, "Cannot parse package " + debugPathName + ". Assuming defaults.",
+                            e);
+                    Log.e(LOG_TAG,
+                            "Cannot calculate installed size " + debugPathName
+                                    + ". Try only apk size.");
+                    params.setSize(pfd.getStatSize());
+                }
             }
         } else {
             Log.e(LOG_TAG, "Cannot parse package " + debugPathName + ". Assuming defaults.");
@@ -282,6 +288,7 @@ public class InstallStaging extends Activity {
     private final class StagingAsyncTask extends
             AsyncTask<Void, Integer, PackageInstaller.SessionInfo> {
         private ProgressBar mProgressBar = null;
+        private boolean mHasObb = false;
 
         private long getContentSizeBytes() {
             try (AssetFileDescriptor afd = openAssetFileDescriptor(getIntent().getData())) {
@@ -307,41 +314,23 @@ public class InstallStaging extends Activity {
         @Override
         protected PackageInstaller.SessionInfo doInBackground(Void... params) {
             Uri packageUri = getIntent().getData();
-            try (PackageInstaller.Session session = mInstaller.openSession(mStagedSessionId);
-                 InputStream in = getContentResolver().openInputStream(packageUri)) {
-                session.setStagingProgress(0);
-
-                if (in == null) {
+            try (PackageInstaller.Session session = mInstaller.openSession(mStagedSessionId)) {
+                PackageBundleHelper.BundleStageResult result =
+                        PackageBundleHelper.stageUriIntoSession(
+                                InstallStaging.this,
+                                packageUri,
+                                getIntent().getType(),
+                                session,
+                                () -> !isCancelled(),
+                                progress -> {
+                                    if (progress >= 0) {
+                                        publishProgress(progress);
+                                    }
+                                });
+                if (!result.getSuccess()) {
                     return null;
                 }
-
-                long sizeBytes = getContentSizeBytes();
-
-                long totalRead = 0;
-                try (OutputStream out = session.openWrite("PackageInstaller", 0, sizeBytes)) {
-                    byte[] buffer = new byte[1024 * 1024];
-                    while (true) {
-                        int numRead = in.read(buffer);
-
-                        if (numRead == -1) {
-                            session.fsync(out);
-                            break;
-                        }
-
-                        if (isCancelled()) {
-                            break;
-                        }
-
-                        out.write(buffer, 0, numRead);
-                        if (sizeBytes > 0) {
-                            totalRead += numRead;
-                            float fraction = ((float) totalRead / (float) sizeBytes);
-                            session.setStagingProgress(fraction);
-                            publishProgress((int) (fraction * 100.0));
-                        }
-                    }
-                }
-
+                mHasObb = result.getHasObb();
                 return mInstaller.getSessionInfo(mStagedSessionId);
             } catch (IOException | SecurityException | IllegalStateException
                      | IllegalArgumentException e) {
@@ -367,9 +356,14 @@ public class InstallStaging extends Activity {
                 return;
             }
 
-            // Pass the staged session to the installer.
             Intent installIntent = new Intent(getIntent());
             installIntent.setClass(InstallStaging.this, DeleteStagedFileOnResult.class);
+            if (mHasObb) {
+                Uri bundleUri = getIntent().getData();
+                installIntent.putExtra(PackageBundleHelper.EXTRA_BUNDLE_URI, bundleUri);
+                installIntent.setClipData(ClipData.newRawUri(null, bundleUri));
+                installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
             installIntent.setData(Uri.fromFile(new File(sessionInfo.getResolvedBaseApkPath())));
 
             installIntent.putExtra(EXTRA_STAGED_SESSION_ID, mStagedSessionId);

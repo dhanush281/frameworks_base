@@ -375,9 +375,11 @@ object PackageUtil {
     }
 
     private fun processAppInfoForFile(appInfo: ApplicationInfo, sourceFile: File): ApplicationInfo {
-        val archiveFilePath = sourceFile.absolutePath
+        val archiveFilePath = appInfo.sourceDir ?: sourceFile.absolutePath
         appInfo.publicSourceDir = archiveFilePath
-        if (appInfo.splitNames != null && appInfo.splitSourceDirs == null) {
+        if (appInfo.splitSourceDirs != null && appInfo.splitPublicSourceDirs == null) {
+            appInfo.splitPublicSourceDirs = appInfo.splitSourceDirs
+        } else if (appInfo.splitNames != null && appInfo.splitSourceDirs == null) {
             val files = sourceFile.parentFile?.listFiles()
             val splits = appInfo.splitNames!!
                 .mapNotNull { findFilePath(files, "$it.apk") }
@@ -438,27 +440,29 @@ object PackageUtil {
      */
     @JvmStatic
     fun getPackageInfo(context: Context, sourceFile: File, flags: Int): PackageInfo? {
-        var filePath = sourceFile.absolutePath
-        if (filePath.endsWith(SPLIT_BASE_APK_SUFFIX)) {
-            val dir = sourceFile.parentFile
+        val dir = sourceFile.parentFile
+        if (dir != null) {
             try {
                 Files.list(dir.toPath()).use { list ->
                     val count: Long = list
-                        .filter { name: Path -> name.endsWith(SPLIT_APK_SUFFIX) }
+                        .filter { path: Path ->
+                            path.fileName?.toString()?.endsWith(SPLIT_APK_SUFFIX) == true
+                        }
                         .limit(2)
                         .count()
                     if (count > 1) {
-                        // split apks, use file directory to get archive info
-                        filePath = dir.path
+                        val clusterInfo = context.packageManager
+                            .getPackageArchiveInfo(dir.path, flags)
+                        if (clusterInfo != null) {
+                            return clusterInfo
+                        }
                     }
                 }
             } catch (ignored: Exception) {
-                // No access to the parent directory, proceed to read app snippet
-                // from the base apk only
             }
         }
         return try {
-            context.packageManager.getPackageArchiveInfo(filePath, flags)
+            context.packageManager.getPackageArchiveInfo(sourceFile.absolutePath, flags)
         } catch (ignored: Exception) {
             null
         }

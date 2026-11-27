@@ -26,6 +26,7 @@ import android.app.AppOpsManager;
 import android.app.Dialog;
 import android.app.DialogFragment;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -57,6 +58,8 @@ import android.widget.Button;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+
+import com.android.packageinstaller.common.PackageBundleHelper;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -738,6 +741,13 @@ public class PackageInstallerActivity extends Activity {
         }
         if (mAppSnippet != null) {
             newIntent.putExtra(EXTRA_APP_SNIPPET, mAppSnippet);
+        }
+        Uri bundleUri = getIntent().getParcelableExtra(
+                PackageBundleHelper.EXTRA_BUNDLE_URI, Uri.class);
+        if (bundleUri != null) {
+            newIntent.putExtra(PackageBundleHelper.EXTRA_BUNDLE_URI, bundleUri);
+            newIntent.setClipData(ClipData.newRawUri(null, bundleUri));
+            newIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         }
         newIntent.addFlags(Intent.FLAG_ACTIVITY_FORWARD_RESULT);
         if (mLocalLOGV) Log.i(TAG, "downloaded app uri=" + mPackageURI);
